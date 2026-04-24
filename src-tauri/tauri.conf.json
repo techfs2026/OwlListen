@@ -1,0 +1,32 @@
+{
+  "productName": "LangListen Waveform",
+  "version": "0.1.0",
+  "identifier": "com.langlisten.waveform",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LangListen Waveform",
+        "width": 1200,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 500,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$HOME/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$DESKTOP/**"]
+      }
+    }
+  },
+  "plugins": {
+  }
+}
