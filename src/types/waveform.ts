@@ -31,23 +31,23 @@ export type LoadingState = "idle" | "decoding" | "building" | "ready" | "error";
 // ── 渲染配置 ──────────────────────────────────────────────────────────────────
 
 export interface WaveformColors {
-  wave: string;         // 波形填充色
-  playhead: string;     // 播放头竖线
-  labelFill: string;    // 已保存标记填充色
-  labelBorder: string;  // 已保存标记边线色
-  selection: string;    // 拖拽中选区填充色
-  background: string;   // 背景色
-  centerLine?: string;  // 中心参考线（可选）
+  wave: string;
+  playhead: string;
+  labelFill: string;
+  labelBorder: string;
+  selection: string;
+  background: string;
+  centerLine?: string;
 }
 
 export const DEFAULT_COLORS: WaveformColors = {
-  wave:        "#2563EB",  // 蓝色波形
-  playhead:    "#1D4ED8",  // 深蓝播放头
-  labelFill:   "#BFDBFE",  // 浅蓝标记填充（blue-200）
-  labelBorder: "#3B82F6",  // 蓝色标记边线
-  selection:   "#BAE6FD",  // 天蓝拖拽选区（sky-200）
-  background:  "#F8FAFF",  // 白色背景
-  centerLine:  "#C8D6F0",  // 中心参考线
+  wave:        "#2563EB",
+  playhead:    "#1D4ED8",
+  labelFill:   "#BFDBFE",
+  labelBorder: "#3B82F6",
+  selection:   "#BAE6FD",
+  background:  "#FAFAF7",
+  centerLine:  "#C8D6F0",
 };
 
 // ── WebGL 内部类型 ────────────────────────────────────────────────────────────
@@ -57,4 +57,31 @@ export interface GlResources {
   program: WebGLProgram;
   vao: WebGLVertexArrayObject;
   vbo: WebGLBuffer;
+}
+
+// ── 精听模式类型 ──────────────────────────────────────────────────────────────
+
+export interface ListenSegment {
+  index: number;
+  /** ZIP 内的相对路径，e.g. "segments/0000.wav" */
+  audio: string;
+  start: number;
+  end: number;
+  /** Whisper 转写原文 */
+  text: string;
+  /** 标注时用户填写的备注 */
+  label: string;
+}
+
+export interface PackMetadata {
+  version: number;
+  segments: ListenSegment[];
+}
+
+export type SegmentStatus = "pending" | "done" | "flagged";
+
+export interface SegmentState {
+  status: SegmentStatus;
+  /** 用户听写内容 */
+  userText: string;
 }
