@@ -39,81 +39,107 @@ export function PracticePanel({
   hasPrev,
   hasNext,
 }: PracticePanelProps) {
+  // playing / duration 由 audio 事件驱动；currentTime 由常驻 RAF 驱动
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  // 原文和 Diff 共用一个开关：false=隐藏, true=展示原文+diff
   const [showRef, setShowRef] = useState(false);
   const [textareaFocused, setTextareaFocused] = useState(false);
 
-  const audioRef    = useRef<HTMLAudioElement | null>(null);
-  const rafRef      = useRef<number>(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const panelRef    = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // ── 片段切换：重置所有状态 ─────────────────────────────────────────────────
+  // ── 常驻 RAF：mount 时启动，unmount 时停止，和播放状态无关 ────────────────
+  // 始终读取 audio.currentTime，paused 时值不变，进度条自然静止，无需重启链条
 
   useEffect(() => {
-    setPlaying(false);
-    setCurrentTime(0);
-    setDuration(0);
-    setShowRef(false);
-    cancelAnimationFrame(rafRef.current);
+    let id: number;
+    const tick = () => {
+      const audio = audioRef.current;
+      if (audio) setCurrentTime(audio.currentTime);
+      id = requestAnimationFrame(tick);
+    };
+    id = requestAnimationFrame(tick);
+    console.log("[RAF] chain started, id=", id);
+    return () => {
+      console.log("[RAF] chain stopped, id=", id);
+      cancelAnimationFrame(id);
+    };
+  }, []); // 空依赖，只跑一次
 
+  // ── 片段切换：重置状态，重新加载音频 ──────────────────────────────────────
+
+  useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
+
+    console.log("[segment] change → index=", segment?.index, "url=", audioUrl);
     audio.pause();
-    audio.currentTime = 0;
     audio.src = audioUrl ?? "";
+    audio.currentTime = 0;
+
+    setPlaying(false);
+    setDuration(0);
+    setShowRef(false);
+
     if (audioUrl) audio.load();
   }, [audioUrl, segment?.index]);
 
-  // ── 播放器逻辑 ─────────────────────────────────────────────────────────────
+  // ── 播放控制：只负责调用 audio API，状态由事件回调维护 ────────────────────
 
-  const tick = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    setCurrentTime(audio.currentTime);
-    if (!audio.paused) rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  const handlePlay = useCallback(() => {
+  const handlePlay = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
-    audio.play();
-    setPlaying(true);
-    rafRef.current = requestAnimationFrame(tick);
-  }, [audioUrl, tick]);
+    console.log("audioUrl:", audioUrl);
+    console.log("[handlePlay] before play() currentTime=", audio.currentTime, "paused=", audio.paused);
+
+    audio.pause();
+    audio.currentTime = 0;
+    audio.load();
+    
+    try {
+      await audio.play();
+      console.log("[handlePlay] play() resolved currentTime=", audio.currentTime);
+    } catch (err) {
+      console.warn("[handlePlay] play() rejected", err);
+    }
+  }, [audioUrl]);
 
   const handlePause = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    setPlaying(false);
-    cancelAnimationFrame(rafRef.current);
+    audioRef.current?.pause();
+    // onpause 事件会触发 setPlaying(false)
   }, []);
 
   const handleTogglePlay = useCallback(() => {
-    playing ? handlePause() : handlePlay();
-  }, [playing, handlePlay, handlePause]);
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.paused ? handlePlay() : handlePause();
+  }, [handlePlay, handlePause]);
 
-  const handleEnded = () => {
-    setPlaying(false);
-    cancelAnimationFrame(rafRef.current);
-    if (audioRef.current) setCurrentTime(audioRef.current.duration);
-  };
-
-  const handleSeek = (sec: number) => {
+  const handleSeek = useCallback((sec: number) => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = sec;
-    setCurrentTime(sec);
-  };
+    // currentTime 由常驻 RAF 读取，无需手动 set
+  }, []);
 
-  const handleReplay = useCallback(() => {
-    handleSeek(0);
-    handlePlay();
-  }, [handlePlay]);
+  const handleReplay = useCallback(async () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    console.log("[handleReplay] reload replay");
+
+    audio.pause();
+    audio.currentTime = 0;
+    audio.load();
+
+    try {
+      await audio.play();
+    } catch (e) {
+      console.warn(e);
+    }
+  }, []);
 
   const navTo = useCallback((fn: () => void) => {
     handlePause();
@@ -121,20 +147,16 @@ export function PracticePanel({
   }, [handlePause]);
 
   // ── 全键盘操作 ─────────────────────────────────────────────────────────────
-  // 挂在面板容器上，tabIndex=-1 使其可聚焦接收键盘事件
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const inTextarea = textareaFocused;
 
     switch (e.key) {
-      // Tab：播放/暂停（在 textarea 内也劫持，防止焦点跳走）
       case "Tab": {
         e.preventDefault();
         handleTogglePlay();
         break;
       }
-
-      // R：重播（textarea 内不劫持，避免阻止正常输入 r）
       case "r":
       case "R": {
         if (inTextarea) break;
@@ -142,16 +164,12 @@ export function PracticePanel({
         handleReplay();
         break;
       }
-
-      // Enter：切换对照（textarea 内用 Shift+Enter 触发，普通 Enter 换行）
       case "Enter": {
         if (inTextarea && !e.shiftKey) break;
         e.preventDefault();
         setShowRef((v) => !v);
         break;
       }
-
-      // J：上一段（textarea 内不劫持）
       case "j":
       case "J": {
         if (inTextarea) break;
@@ -159,8 +177,6 @@ export function PracticePanel({
         if (hasPrev) navTo(onPrev);
         break;
       }
-
-      // L：下一段（textarea 内不劫持）
       case "l":
       case "L": {
         if (inTextarea) break;
@@ -168,8 +184,6 @@ export function PracticePanel({
         if (hasNext) navTo(onNext);
         break;
       }
-
-      // Escape：textarea 失焦，回到面板快捷键模式
       case "Escape": {
         if (inTextarea) {
           textareaRef.current?.blur();
@@ -202,10 +216,52 @@ export function PracticePanel({
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
+      {/*
+        audio 元素上只挂事件回调，完全不依赖外部 ref 手动同步状态。
+        所有播放状态变化的唯一来源是这里的事件。
+      */}
       <audio
         ref={audioRef}
-        onLoadedMetadata={() => { if (audioRef.current) setDuration(audioRef.current.duration); }}
-        onEnded={handleEnded}
+        onPlay={(e) => {
+          const a = e.target as HTMLAudioElement;
+
+          console.log("[audio] onPlay", performance.now());
+
+          requestAnimationFrame(() => {
+            console.log("[audio] first frame", performance.now(), a.currentTime);
+          });
+        }}
+        onPause={(e) => {
+          const a = e.target as HTMLAudioElement;
+          console.log("[audio] onPause currentTime=", a.currentTime, "duration=", a.duration);
+          setPlaying(false);
+        }}
+        onEnded={(e) => {
+          const a = e.target as HTMLAudioElement;
+
+          setPlaying(false);
+          a.currentTime = 0;
+        }}
+        onSeeking={(e) => {
+          const a = e.target as HTMLAudioElement;
+          console.log("[audio] onSeeking currentTime=", a.currentTime);
+        }}
+        onSeeked={(e) => {
+          const a = e.target as HTMLAudioElement;
+          console.log("[audio] onSeeked  currentTime=", a.currentTime);
+        }}
+        onWaiting={() => console.log("[audio] onWaiting (buffering)")}
+        onStalled={() => console.log("[audio] onStalled")}
+        onDurationChange={(e) => {
+          const d = (e.target as HTMLAudioElement).duration;
+          console.log("[audio] onDurationChange duration=", d);
+          if (isFinite(d) && d > 0) setDuration(d);
+        }}
+        onLoadedMetadata={(e) => {
+          const d = (e.target as HTMLAudioElement).duration;
+          console.log("[audio] onLoadedMetadata duration=", d);
+          if (isFinite(d) && d > 0) setDuration(d);
+        }}
         preload="metadata"
       />
 
@@ -277,11 +333,9 @@ export function PracticePanel({
 
         {showRef && (
           <>
-            {/* 原文纯文本 */}
             <div style={s.refText}>
               {segment.text || <em style={{ color: C.ink3 }}>（无转写文本）</em>}
             </div>
-            {/* Diff（只有原文和用户输入都非空时才渲染） */}
             {segState.userText.trim() && segment.text && diff && (
               <DiffView result={diff} />
             )}
@@ -357,70 +411,53 @@ const s: Record<string, React.CSSProperties> = {
     flex: 1,
     display: "flex",
     flexDirection: "column",
-    padding: "clamp(14px, 2.5vh, 32px) clamp(16px, 2.5vw, 40px)",
-    gap: "clamp(10px, 1.5vh, 20px)",
+    padding: "32px 48px",
+    gap: 24,
     overflowY: "auto",
     outline: "none",
   },
-  textarea: {
-    width: "100%",
-    border: `0.5px solid ${C.border2}`,
-    borderRadius: 10,
-    padding: "clamp(8px, 1.2vh, 14px) clamp(10px, 1vw, 16px)",
-    fontFamily: FONT.sans,
-    fontSize: "clamp(13px, 1.1vw, 16px)",  // ← 随窗口缩放
-    color: C.ink,
-    background: C.paper,
-    outline: "none",
-    lineHeight: 1.7,
-    resize: "none" as const,
-    transition: "border-color 0.15s, box-shadow 0.15s",
-  },
-  refText: {
-    background: C.paper2,
-    border: `0.5px solid ${C.border}`,
-    borderRadius: 10,
-    padding: "clamp(8px, 1.2vh, 14px) clamp(10px, 1vw, 16px)",
-    fontSize: "clamp(13px, 1.1vw, 16px)",  // ← 同上
-    color: C.ink,
-    lineHeight: 1.7,
-    fontFamily: FONT.sans,
+  segInfo: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap" as const,
   },
   segNum: {
     fontFamily: FONT.mono,
-    fontSize: "clamp(11px, 0.9vw, 14px)",
+    fontSize: 18,
     color: C.blue,
-    fontWeight: 500,
+    fontWeight: 700,
+    letterSpacing: "-0.01em",
   },
   segLabel: {
-    fontSize: 12,
+    fontSize: 13,
     color: C.ink2,
     background: C.paper2,
     border: `0.5px solid ${C.border2}`,
-    borderRadius: 4,
-    padding: "1px 7px",
+    borderRadius: 5,
+    padding: "3px 10px",
   },
   segDur: {
     fontFamily: FONT.mono,
-    fontSize: 10,
+    fontSize: 12,
     color: C.ink3,
   },
   kbdRow: {
     display: "flex",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
     marginLeft: "auto",
     flexWrap: "wrap" as const,
   },
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: 6,
+    gap: 10,
     flexShrink: 0,
   },
   sectionLabel: {
     fontFamily: FONT.mono,
-    fontSize: 9.5,
+    fontSize: 11,
     letterSpacing: "0.10em",
     textTransform: "uppercase" as const,
     color: C.ink3,
@@ -429,25 +466,25 @@ const s: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   focusBadge: {
-    fontSize: 9,
+    fontSize: 11,
     color: C.blue,
     background: C.blueLt,
     borderRadius: 3,
-    padding: "1px 6px",
+    padding: "1px 7px",
     fontFamily: FONT.mono,
     letterSpacing: "0.04em",
   },
   textarea: {
     width: "100%",
     border: `0.5px solid ${C.border2}`,
-    borderRadius: 10,
-    padding: "10px 13px",
+    borderRadius: 12,
+    padding: "16px 20px",
     fontFamily: FONT.sans,
-    fontSize: 14,
+    fontSize: 17,
     color: C.ink,
     background: C.paper,
     outline: "none",
-    lineHeight: 1.7,
+    lineHeight: 1.9,
     resize: "none" as const,
     transition: "border-color 0.15s, box-shadow 0.15s",
   },
@@ -459,21 +496,21 @@ const s: Record<string, React.CSSProperties> = {
   refText: {
     background: C.paper2,
     border: `0.5px solid ${C.border}`,
-    borderRadius: 10,
-    padding: "10px 13px",
-    fontSize: 14,
+    borderRadius: 12,
+    padding: "16px 20px",
+    fontSize: 17,
     color: C.ink,
-    lineHeight: 1.7,
+    lineHeight: 1.9,
     fontFamily: FONT.sans,
   },
   kbdInline: {
     fontFamily: FONT.mono,
-    fontSize: 9,
+    fontSize: 10,
     background: C.paper3,
     border: `0.5px solid ${C.border2}`,
     borderRadius: 3,
-    padding: "0 4px",
-    marginLeft: 5,
+    padding: "0 5px",
+    marginLeft: 6,
     color: C.ink3,
     verticalAlign: "middle",
     boxShadow: `0 1px 0 ${C.border2}`,
@@ -481,10 +518,10 @@ const s: Record<string, React.CSSProperties> = {
   controls: {
     display: "flex",
     alignItems: "center",
-    gap: 7,
+    gap: 10,
     flexWrap: "wrap" as const,
     flexShrink: 0,
     marginTop: "auto",
-    paddingTop: 4,
+    paddingTop: 8,
   },
 };

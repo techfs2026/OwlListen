@@ -125,7 +125,7 @@ pub fn get_temp_dir() -> Result<String, String> {
 
 // ── 新命令：切割音频 ──────────────────────────────────────────────────────────
 //
-// 使用 FFmpeg 按 labels 切割出片段，保存为 WAV 格式
+// 使用 FFmpeg 按 labels 切割出片段，保存为 MP3 格式
 // 返回片段文件路径列表
 
 #[tauri::command]
@@ -144,7 +144,7 @@ pub fn split_audio(
     let mut segment_paths = Vec::with_capacity(labels.len());
 
     for (i, label) in labels.iter().enumerate() {
-        let out_path = out_dir.join(format!("{:04}.wav", i));
+        let out_path = out_dir.join(format!("{:04}.mp3", i));
         split_segment(&audio_path, label.start, label.end, &out_path)
             .map_err(|e| format!("Segment {i}: {e}"))?;
         segment_paths.push(out_path.to_string_lossy().into_owned());
@@ -153,7 +153,7 @@ pub fn split_audio(
     Ok(segment_paths)
 }
 
-/// 用 FFmpeg 从 [start_sec, end_sec) 提取片段并保存为 WAV
+/// 用 FFmpeg 从 [start_sec, end_sec) 提取片段并保存为 MP3
 ///
 /// 策略：全量解码整个文件到 f32 PCM，然后按样本数精确裁剪。
 /// 避免 seek + pts 时间戳对齐的所有坑，对于几分钟到几十分钟的音频完全够用。
@@ -183,44 +183,114 @@ fn split_segment(
     );
 
     let slice = &audio.samples[start_sample..end_sample];
-    write_wav(output_path, slice, target_sr)?;
+    write_mp3(output_path, slice, target_sr)?;
     Ok(())
 }
 
-/// 写入 16-bit PCM WAV（单声道）
-fn write_wav(path: &Path, samples: &[f32], sample_rate: u32) -> anyhow::Result<()> {
-    use std::io::{BufWriter, Write};
+/// 将 f32 PCM 样本编码为 MP3 并写入文件（ffmpeg-next / libmp3lame）
+fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> anyhow::Result<()> {
     use anyhow::Context;
+    use ffmpeg_next as ffmpeg;
+    use ffmpeg::util::frame::audio::Audio as AudioFrame;
+    use ffmpeg::format::Sample;
+    use ffmpeg::format::sample::Type as SampleType;
+    use ffmpeg::ChannelLayout;
 
-    let pcm: Vec<i16> = samples.iter()
-        .map(|&s| (s.clamp(-1.0, 1.0) * 32767.0) as i16)
-        .collect();
+    ffmpeg::init().context("ffmpeg init")?;
 
-    let data_len = (pcm.len() * 2) as u32;
-    let mut f = BufWriter::new(std::fs::File::create(path).context("create wav")?);
+    // ── 输出容器 ──────────────────────────────────────────────────────────────
+    let mut octx = ffmpeg::format::output(&path).context("open output")?;
 
-    // RIFF header
-    f.write_all(b"RIFF")?;
-    f.write_all(&(data_len + 36).to_le_bytes())?;
-    f.write_all(b"WAVE")?;
-    // fmt chunk
-    f.write_all(b"fmt ")?;
-    f.write_all(&16u32.to_le_bytes())?;    // chunk size
-    f.write_all(&1u16.to_le_bytes())?;     // PCM
-    f.write_all(&1u16.to_le_bytes())?;     // mono
-    f.write_all(&sample_rate.to_le_bytes())?;
-    f.write_all(&(sample_rate * 2).to_le_bytes())?; // byte rate
-    f.write_all(&2u16.to_le_bytes())?;     // block align
-    f.write_all(&16u16.to_le_bytes())?;    // bits per sample
-    // data chunk
-    f.write_all(b"data")?;
-    f.write_all(&data_len.to_le_bytes())?;
-    for s in &pcm {
-        f.write_all(&s.to_le_bytes())?;
+    // ── 编码器：libmp3lame ────────────────────────────────────────────────────
+    // ffmpeg-next 现代 API：编码器从 codec::context::Context 独立构建，
+    // open 之后再 add_stream 并用 set_parameters 把参数写入容器。
+    let codec = ffmpeg::encoder::find_by_name("libmp3lame")
+        .context("libmp3lame not found — ffmpeg built without MP3 support?")?;
+
+    let mut encoder = {
+        let ctx = ffmpeg::codec::context::Context::new_with_codec(codec);
+        let mut enc = ctx.encoder().audio().context("get audio encoder")?;
+        enc.set_rate(sample_rate as i32);
+        enc.set_channel_layout(ChannelLayout::MONO);
+        enc.set_format(Sample::F32(SampleType::Planar));
+        enc.set_bit_rate(64_000); // 64 kbps，精听场景足够
+        enc.set_time_base((1, sample_rate as i32));
+        enc.open_as(codec).context("open encoder")?
+    };
+
+    // 编码器 open 后把参数写入输出流
+    let mut stream = octx.add_stream(ffmpeg::codec::Id::None).context("add stream")?;
+    stream.set_parameters(&encoder);
+    stream.set_time_base((1, sample_rate as i32));
+
+    octx.write_header().context("write header")?;
+
+    // ── 按 frame_size 分块送帧 ────────────────────────────────────────────────
+    // libmp3lame 固定帧大小 1152 样本；最后一块不足时补零
+    let frame_size = encoder.frame_size() as usize;
+    let mut pts: i64 = 0;
+    let mut offset = 0;
+
+    while offset < samples.len() {
+        let chunk_end = (offset + frame_size).min(samples.len());
+        let chunk = &samples[offset..chunk_end];
+        offset = chunk_end;
+
+        let mut frame = AudioFrame::new(
+            Sample::F32(SampleType::Planar),
+            frame_size, // 始终分配完整帧，不足部分保持零
+            ChannelLayout::MONO,
+        );
+        frame.set_rate(sample_rate);
+        frame.set_pts(Some(pts));
+        pts += chunk.len() as i64;
+
+        // 写入样本到 plane 0
+        let plane: &mut [f32] = unsafe {
+            std::slice::from_raw_parts_mut(
+                frame.data_mut(0).as_mut_ptr() as *mut f32,
+                frame_size,
+            )
+        };
+        plane[..chunk.len()].copy_from_slice(chunk);
+        // 不足 frame_size 的尾部已由 AudioFrame::new 零初始化
+
+        mp3_send_frame(&mut encoder, &mut octx, Some(&frame))?;
     }
 
+    // ── flush 编码器 ──────────────────────────────────────────────────────────
+    mp3_send_frame(&mut encoder, &mut octx, None)?;
+    octx.write_trailer().context("write trailer")?;
     Ok(())
 }
+
+/// 送一帧（或 EOF）并把所有就绪的包写入容器
+fn mp3_send_frame(
+    encoder: &mut ffmpeg_next::codec::encoder::audio::Audio,
+    octx:    &mut ffmpeg_next::format::context::Output,
+    frame:   Option<&ffmpeg_next::util::frame::audio::Audio>,
+) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use ffmpeg_next::Error;
+
+    match frame {
+        Some(f) => encoder.send_frame(f).context("send_frame")?,
+        None    => encoder.send_eof().context("send_eof")?,
+    }
+
+    let mut pkt = ffmpeg_next::Packet::empty();
+    loop {
+        match encoder.receive_packet(&mut pkt) {
+            Ok(()) => { pkt.write_interleaved(octx).context("write packet")?; }
+            Err(Error::Other { errno }) if errno == ffmpeg_next::error::EAGAIN => break,
+            Err(Error::Eof)  => break,
+            Err(e) => return Err(anyhow::anyhow!(e)).context("receive_packet"),
+        }
+    }
+    Ok(())
+}
+
+
 
 // ── 新命令：Whisper 转写 ──────────────────────────────────────────────────────
 //
@@ -294,8 +364,10 @@ fn transcribe_one(
     use anyhow::Context;
     use whisper_rs::{FullParams, SamplingStrategy};
 
-    // 读取 WAV → f32 样本
-    let samples = read_wav_f32(wav_path).context("read wav")?;
+    // 用 decode_audio 解码（支持 MP3 / WAV / 任意 ffmpeg 格式），重采样到 16000 Hz
+    let audio = crate::audio::decode_audio(wav_path, 16000)
+        .with_context(|| format!("decode {wav_path}"))?;
+    let samples = audio.samples;
 
     let mut state = ctx.create_state().context("create state")?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
@@ -319,25 +391,6 @@ fn transcribe_one(
     Ok(text.trim().to_string())
 }
 
-fn read_wav_f32(path: &str) -> anyhow::Result<Vec<f32>> {
-    use anyhow::Context;
-    use std::io::{BufReader, Read, Seek, SeekFrom};
-
-    let mut f = BufReader::new(std::fs::File::open(path).context("open wav")?);
-
-    // 跳过 WAV header（44 字节标准 PCM header）
-    f.seek(SeekFrom::Start(44)).context("seek wav data")?;
-
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).context("read wav")?;
-
-    let samples: Vec<f32> = buf
-        .chunks_exact(2)
-        .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
-        .collect();
-
-    Ok(samples)
-}
 
 // ── 新命令：打包 ZIP ──────────────────────────────────────────────────────────
 //
@@ -394,7 +447,7 @@ pub fn build_zip(
         .enumerate()
         .map(|(i, _)| MetadataSegment {
             index: i,
-            audio: format!("segments/{:04}.wav", i),
+            audio: format!("segments/{:04}.mp3", i),
             start: labels.get(i).map(|l| l.start).unwrap_or(0.0),
             end:   labels.get(i).map(|l| l.end).unwrap_or(0.0),
             text:  transcriptions.get(i).cloned().unwrap_or_default(),
@@ -411,7 +464,7 @@ pub fn build_zip(
 
     // 写入每个音频片段
     for (i, seg_path) in segment_paths.iter().enumerate() {
-        let file_name = format!("segments/{:04}.wav", i);
+        let file_name = format!("segments/{:04}.mp3", i);
         zip.start_file(&file_name, opts).map_err(|e| e.to_string())?;
 
         let mut seg_file = std::fs::File::open(seg_path)
