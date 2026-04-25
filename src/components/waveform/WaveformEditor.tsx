@@ -4,9 +4,16 @@ import { WaveformCanvas } from "./WaveformCanvas";
 import { LabelList } from "./LabelList";
 import { Toolbar } from "./Toolbar";
 import { PlayerBar } from "./PlayerBar";
+import { ExportPanel, type ExportProgress } from "./ExportPanel";
 import { useWaveform } from "@/hooks/useWaveform";
 import { useLabels } from "@/hooks/useLabels";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import {
+  splitAudio,
+  transcribeSegments,
+  buildZip,
+  getTempDir,
+} from "@/utils/tauriApi";
 
 export function WaveformEditor() {
   const {
@@ -40,12 +47,14 @@ export function WaveformEditor() {
     play,
     pause,
     seek,
-    toggle,
     unload: unloadAudio,
   } = useAudioPlayer();
 
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
-  const [labelingMode, setLabelingMode] = useState(false);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+
+  // 当前加载的音频文件路径（用于导出时切割）
+  const audioPathRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ── 峰值刷新 ────────────────────────────────────────────────────────────────
@@ -67,15 +76,13 @@ export function WaveformEditor() {
     return () => ro.disconnect();
   }, [refreshPeaks]);
 
-  // ── 播放头跟随：播放时自动滚动视图 ─────────────────────────────────────────
+  // ── 播放头跟随 ───────────────────────────────────────────────────────────────
   useEffect(() => {
     if (playState !== "playing") return;
     const dur = viewRange.endSec - viewRange.startSec;
-    // 播放头超出右边界时，向右滚动一屏
     if (currentTime > viewRange.endSec) {
       setViewRange({ startSec: currentTime, endSec: currentTime + dur });
     }
-    // 播放头超出左边界时，跳回当前位置
     if (currentTime < viewRange.startSec) {
       setViewRange({ startSec: currentTime, endSec: currentTime + dur });
     }
@@ -91,15 +98,11 @@ export function WaveformEditor() {
       ],
     });
     if (typeof path !== "string") return;
-
-    // 同时加载波形和音频，互相独立不阻塞
+    audioPathRef.current = path;
     setPeaks(null);
     clearLabels();
     unloadAudio();
-    await Promise.all([
-      loadWaveform(path),
-      loadAudio(path),
-    ]);
+    await Promise.all([loadWaveform(path), loadAudio(path)]);
   }, [loadWaveform, loadAudio, clearLabels, unloadAudio]);
 
   const handleSaveLabels = useCallback(async () => {
@@ -119,8 +122,6 @@ export function WaveformEditor() {
   }, [loadFromFile]);
 
   // ── 波形交互 ─────────────────────────────────────────────────────────────────
-
-  // 浏览模式单击：定位播放头并跳转播放
   const handleSeek = useCallback((sec: number) => {
     seek(sec);
   }, [seek]);
@@ -148,11 +149,64 @@ export function WaveformEditor() {
     const file = e.dataTransfer.files[0];
     if (!file) return;
     const path = (file as unknown as { path?: string }).path ?? file.name;
+    audioPathRef.current = path;
     setPeaks(null);
     clearLabels();
     unloadAudio();
     await Promise.all([loadWaveform(path), loadAudio(path)]);
   }, [loadWaveform, loadAudio, clearLabels, unloadAudio]);
+
+  // ── 导出数据包 ────────────────────────────────────────────────────────────────
+  const handleExportPackage = useCallback(async () => {
+    if (!audioPathRef.current || labels.length === 0) return;
+
+    const zipPath = await save({
+      defaultPath: "listening_pack.zip",
+      filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
+    });
+    if (typeof zipPath !== "string") return;
+
+    const labelData = labels.map((l) => ({
+      start: l.start,
+      end: l.end,
+      text: l.text,
+    }));
+
+    setExportProgress({ step: "splitting", transcribed: 0, total: labels.length });
+
+    try {
+      // 1. 切割音频
+      const tmpDir = await getTempDir();
+      const segmentPaths = await splitAudio(audioPathRef.current, labelData, tmpDir);
+
+      // 2. Whisper 转写（逐条更新进度）
+      setExportProgress({ step: "transcribing", transcribed: 0, total: segmentPaths.length });
+      const transcriptions: string[] = [];
+
+      // 分批调用，每次转写一个，更新进度
+      for (let i = 0; i < segmentPaths.length; i++) {
+        const results = await transcribeSegments([segmentPaths[i]]);
+        transcriptions.push(results[0] ?? "");
+        setExportProgress({
+          step: "transcribing",
+          transcribed: i + 1,
+          total: segmentPaths.length,
+        });
+      }
+
+      // 3. 打包
+      setExportProgress({ step: "zipping", transcribed: transcriptions.length, total: transcriptions.length });
+      await buildZip(segmentPaths, labelData, transcriptions, zipPath);
+
+      setExportProgress({ step: "done", transcribed: transcriptions.length, total: transcriptions.length, outputPath: zipPath });
+    } catch (err) {
+      setExportProgress((prev) => ({
+        ...prev!,
+        step: "error",
+        errorMsg: String(err),
+      }));
+    }
+  }, [labels]);
 
   return (
     <div
@@ -164,13 +218,12 @@ export function WaveformEditor() {
         audioInfo={audioInfo}
         loadingState={loadingState}
         labelCount={labels.length}
-        labelingMode={labelingMode}
         playhead={currentTime}
         onOpenAudio={handleOpenAudio}
         onSaveLabels={handleSaveLabels}
         onLoadLabels={handleLoadLabels}
         onClearLabels={clearLabels}
-        onToggleLabelingMode={() => setLabelingMode((v) => !v)}
+        onExportPackage={handleExportPackage}
         onZoomIn={() => zoomIn()}
         onZoomOut={() => zoomOut()}
         onZoomReset={zoomReset}
@@ -181,7 +234,7 @@ export function WaveformEditor() {
         {loadingState === "idle" && (
           <div style={styles.empty}>
             <div style={styles.emptyIcon}>♪</div>
-            <p style={styles.emptyTitle}>拖入音频文件或点击「打开音频」</p>
+            <p style={styles.emptyTitle}>拖入音频文件，或点击「打开音频」</p>
             <p style={styles.emptyHint}>支持 MP3 · WAV · FLAC · M4A · OGG</p>
           </div>
         )}
@@ -196,9 +249,8 @@ export function WaveformEditor() {
             peaks={peaks}
             viewRange={viewRange}
             duration={audioInfo?.duration ?? 0}
-            playhead={currentTime}        // 直接用播放器的 currentTime
+            playhead={currentTime}
             labels={labels}
-            labelingMode={labelingMode}
             onSeek={handleSeek}
             onRegionSelected={handleRegionSelected}
             onZoom={handleZoom}
@@ -225,6 +277,20 @@ export function WaveformEditor() {
         onJumpTo={handleJumpTo}
         onUpdateText={(id, text) => updateLabel(id, { text })}
       />
+
+      {/* 导出进度弹窗 */}
+      {exportProgress && (
+        <ExportPanel
+          progress={exportProgress}
+          onClose={() => setExportProgress(null)}
+          onReveal={(path) => {
+            // Tauri shell 打开 Finder（在 commands 里实现 reveal_in_finder）
+            import("@tauri-apps/api/core").then(({ invoke }) =>
+              invoke("reveal_in_finder", { path }).catch(console.warn)
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

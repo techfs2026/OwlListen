@@ -4,4 +4,4 @@ pub mod peak;
 
 pub use builder::build_summary;
 pub use extractor::{extract_peaks, ViewRange};
-pub use peak::{Peak, WaveformSummary};
+pub use peak::{WaveformSummary};

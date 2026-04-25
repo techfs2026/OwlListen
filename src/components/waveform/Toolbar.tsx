@@ -4,13 +4,12 @@ interface ToolbarProps {
   audioInfo: AudioInfo | null;
   loadingState: LoadingState;
   labelCount: number;
-  labelingMode: boolean;
   playhead: number;
   onOpenAudio: () => void;
   onSaveLabels: () => void;
   onLoadLabels: () => void;
   onClearLabels: () => void;
-  onToggleLabelingMode: () => void;
+  onExportPackage: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomReset: () => void;
@@ -20,13 +19,12 @@ export function Toolbar({
   audioInfo,
   loadingState,
   labelCount,
-  labelingMode,
   playhead,
   onOpenAudio,
   onSaveLabels,
   onLoadLabels,
   onClearLabels,
-  onToggleLabelingMode,
+  onExportPackage,
   onZoomIn,
   onZoomOut,
   onZoomReset,
@@ -35,7 +33,7 @@ export function Toolbar({
 
   return (
     <div style={styles.bar}>
-      {/* 文件操作 */}
+      {/* 左侧：文件操作 */}
       <div style={styles.group}>
         <button style={styles.btnPrimary} onClick={onOpenAudio}>
           打开音频
@@ -52,37 +50,24 @@ export function Toolbar({
         </button>
       </div>
 
-      {/* 模式切换 */}
-      <div style={styles.group}>
-        <div style={styles.sep} />
-        <button
-          style={{
-            ...styles.btn,
-            ...(labelingMode ? styles.btnActive : {}),
-          }}
-          onClick={onToggleLabelingMode}
-          disabled={!isReady}
-          title={labelingMode ? "拖拽波形添加标记" : "单击定位播放位置"}
-        >
-          {labelingMode ? "● 标记模式" : "○ 浏览模式"}
-        </button>
-      </div>
-
       {/* 缩放 */}
       <div style={styles.group}>
         <div style={styles.sep} />
-        <button style={styles.btnIcon} onClick={onZoomIn}  disabled={!isReady} title="放大（Ctrl+滚轮）">+</button>
+        <button style={styles.btnIcon} onClick={onZoomIn}  disabled={!isReady} title="放大 (Ctrl+滚轮)">+</button>
         <button style={styles.btnIcon} onClick={onZoomOut} disabled={!isReady} title="缩小">−</button>
-        <button style={styles.btn} onClick={onZoomReset} disabled={!isReady}>全览</button>
+        <button style={styles.btn}     onClick={onZoomReset} disabled={!isReady}>全览</button>
       </div>
 
       {/* 弹簧 */}
       <div style={{ flex: 1 }} />
 
-      {/* 状态信息 */}
+      {/* 中间：状态信息 */}
       <div style={styles.info}>
         {loadingState === "decoding" && (
-          <span style={styles.loading}>解码中…</span>
+          <span style={styles.loading}>
+            <span style={styles.dot} />
+            解码中…
+          </span>
         )}
         {loadingState === "error" && (
           <span style={styles.error}>加载失败</span>
@@ -90,22 +75,36 @@ export function Toolbar({
         {isReady && audioInfo && (
           <>
             <span style={styles.time}>
-              {formatTime(playhead)} / {formatTime(audioInfo.duration)}
+              {formatTime(playhead)}
+              <span style={styles.timeSep}>/</span>
+              {formatTime(audioInfo.duration)}
             </span>
             {labelCount > 0 && (
-              <span style={styles.badge}>{labelCount} 个标记</span>
+              <span style={styles.badge}>{labelCount} 段</span>
             )}
-            <span style={styles.meta}>
-              {audioInfo.levelCount} 层金字塔
-            </span>
+            <span style={styles.meta}>{audioInfo.levelCount} 层金字塔</span>
           </>
         )}
+      </div>
+
+      {/* 右侧：导出 */}
+      <div style={styles.group}>
+        <div style={styles.sep} />
+        <button
+          style={styles.btnExport}
+          onClick={onExportPackage}
+          disabled={labelCount === 0}
+          title="切割音频 + Whisper 转写 + 打包 ZIP"
+        >
+          ⬇ 导出数据包
+        </button>
       </div>
     </div>
   );
 }
 
 function formatTime(sec: number): string {
+  if (!isFinite(sec)) return "0:00.000";
   const m = Math.floor(sec / 60);
   const s = sec - m * 60;
   return `${m}:${s < 10 ? "0" : ""}${s.toFixed(3)}`;
@@ -116,17 +115,17 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 2,
-    padding: "0 12px",
+    padding: "0 14px",
     height: 48,
     background: "#FFFFFF",
     borderBottom: "1px solid #E2E8F0",
     flexShrink: 0,
-    boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
   },
   group: {
     display: "flex",
     alignItems: "center",
-    gap: 3,
+    gap: 4,
   },
   sep: {
     width: 1,
@@ -144,7 +143,6 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "5px 11px",
     cursor: "pointer",
     whiteSpace: "nowrap",
-    transition: "all 0.15s",
   },
   btnPrimary: {
     background: "#2563EB",
@@ -153,7 +151,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     fontSize: 12,
     fontWeight: 600,
-    padding: "5px 13px",
+    padding: "5px 14px",
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
@@ -168,10 +166,17 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     lineHeight: 1,
   },
-  btnActive: {
-    background: "#EFF6FF",
-    borderColor: "#3B82F6",
-    color: "#2563EB",
+  btnExport: {
+    background: "#0F172A",
+    border: "1px solid #0F172A",
+    color: "#FFFFFF",
+    borderRadius: 6,
+    fontSize: 12,
+    fontWeight: 600,
+    padding: "5px 14px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    letterSpacing: "0.2px",
   },
   info: {
     display: "flex",
@@ -182,8 +187,12 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: "'SF Mono', 'Fira Code', monospace",
     fontSize: 13,
     color: "#1E293B",
-    letterSpacing: "-0.3px",
     fontWeight: 500,
+    letterSpacing: "-0.3px",
+  },
+  timeSep: {
+    color: "#CBD5E1",
+    margin: "0 3px",
   },
   badge: {
     fontSize: 11,
@@ -199,9 +208,19 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#94A3B8",
   },
   loading: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
     fontSize: 12,
     color: "#D97706",
     fontWeight: 500,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "#D97706",
+    animation: "spin 1s linear infinite",
   },
   error: {
     fontSize: 12,

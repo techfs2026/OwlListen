@@ -14,6 +14,11 @@ pub fn run() {
             commands::get_peaks,
             commands::save_labels,
             commands::load_labels,
+            commands::get_temp_dir,
+            commands::split_audio,
+            commands::transcribe_segments,
+            commands::build_zip,
+            commands::reveal_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

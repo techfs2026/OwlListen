@@ -9,7 +9,6 @@ interface WaveformCanvasProps {
   duration: number;
   playhead: number;
   labels: Label[];
-  labelingMode: boolean;
   colors?: Partial<WaveformColors>;
   onSeek: (sec: number) => void;
   onRegionSelected: (start: number, end: number) => void;
@@ -17,13 +16,14 @@ interface WaveformCanvasProps {
   onScroll: (deltaSec: number) => void;
 }
 
+const DRAG_THRESHOLD_PX = 6; // 超过这个像素才认为是拖拽标记
+
 export function WaveformCanvas({
   peaks,
   viewRange,
   duration,
   playhead,
   labels,
-  labelingMode,
   colors: colorOverrides,
   onSeek,
   onRegionSelected,
@@ -33,8 +33,13 @@ export function WaveformCanvas({
   const { canvasRef, render } = useWebGL();
   const colors = { ...DEFAULT_COLORS, ...colorOverrides };
 
-  // 拖拽状态（纯 ref，不触发 re-render）
-  const dragRef = useRef<{ startSec: number; currentSec: number } | null>(null);
+  // 拖拽状态
+  const dragRef = useRef<{
+    startX: number;         // 鼠标按下时的屏幕 X（用于判断是否超过阈值）
+    startSec: number;
+    currentSec: number;
+    isDragging: boolean;    // 是否已确认为拖拽（超过阈值）
+  } | null>(null);
   const [dragDisplay, setDragDisplay] = useState<[number, number] | null>(null);
 
   // ── 坐标转换 ────────────────────────────────────────────────────────────────
@@ -44,10 +49,7 @@ export function WaveformCanvas({
       if (!canvas) return 0;
       const rect = canvas.getBoundingClientRect();
       const ratio = (x - rect.left) / rect.width;
-      return (
-        viewRange.startSec +
-        ratio * (viewRange.endSec - viewRange.startSec)
-      );
+      return viewRange.startSec + ratio * (viewRange.endSec - viewRange.startSec);
     },
     [canvasRef, viewRange]
   );
@@ -66,26 +68,32 @@ export function WaveformCanvas({
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
       const sec = xToSec(e.clientX);
-
-      if (labelingMode) {
-        dragRef.current = { startSec: sec, currentSec: sec };
-        setDragDisplay([secToRatio(sec), secToRatio(sec)]);
-      } else {
-        onSeek(sec);
-      }
+      dragRef.current = {
+        startX: e.clientX,
+        startSec: sec,
+        currentSec: sec,
+        isDragging: false,
+      };
     },
-    [labelingMode, xToSec, secToRatio, onSeek]
+    [xToSec]
   );
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (!dragRef.current) return;
+      const dx = Math.abs(e.clientX - dragRef.current.startX);
       const sec = xToSec(e.clientX);
       dragRef.current.currentSec = sec;
 
-      const s = Math.min(dragRef.current.startSec, sec);
-      const en = Math.max(dragRef.current.startSec, sec);
-      setDragDisplay([secToRatio(s), secToRatio(en)]);
+      if (!dragRef.current.isDragging && dx >= DRAG_THRESHOLD_PX) {
+        dragRef.current.isDragging = true;
+      }
+
+      if (dragRef.current.isDragging) {
+        const s = Math.min(dragRef.current.startSec, sec);
+        const en = Math.max(dragRef.current.startSec, sec);
+        setDragDisplay([secToRatio(s), secToRatio(en)]);
+      }
     },
     [xToSec, secToRatio]
   );
@@ -94,16 +102,23 @@ export function WaveformCanvas({
     (e: React.MouseEvent) => {
       if (!dragRef.current) return;
       const sec = xToSec(e.clientX);
-      const start = Math.min(dragRef.current.startSec, sec);
-      const end   = Math.max(dragRef.current.startSec, sec);
 
-      if (end - start >= 0.05) {
-        onRegionSelected(start, end);
+      if (dragRef.current.isDragging) {
+        // 拖拽：创建标记
+        const start = Math.min(dragRef.current.startSec, sec);
+        const end = Math.max(dragRef.current.startSec, sec);
+        if (end - start >= 0.05) {
+          onRegionSelected(start, end);
+        }
+      } else {
+        // 点击：定位播放头
+        onSeek(sec);
       }
+
       dragRef.current = null;
       setDragDisplay(null);
     },
-    [xToSec, onRegionSelected]
+    [xToSec, onRegionSelected, onSeek]
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -117,12 +132,9 @@ export function WaveformCanvas({
     (e: React.WheelEvent) => {
       e.preventDefault();
       const centerSec = xToSec(e.clientX);
-
       if (e.ctrlKey || e.metaKey) {
-        // Ctrl+滚轮：缩放
         onZoom(e.deltaY, centerSec);
       } else {
-        // 普通滚轮：横向滚动
         const dur = viewRange.endSec - viewRange.startSec;
         const deltaSec = (e.deltaY / 200) * dur;
         onScroll(deltaSec);
@@ -134,15 +146,11 @@ export function WaveformCanvas({
   // ── 渲染 ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!peaks) return;
-
     const playheadRatio = duration > 0 ? secToRatio(playhead) : 0;
-
-    // 把 labels 转为当前视图内的 0~1 范围
     const normalizedLabels = labels.map((l) => ({
       start: secToRatio(l.start),
-      end:   secToRatio(l.end),
+      end: secToRatio(l.end),
     }));
-
     render({
       peaks,
       playhead: playheadRatio,
@@ -159,7 +167,7 @@ export function WaveformCanvas({
         width: "100%",
         height: "100%",
         display: "block",
-        cursor: labelingMode ? "crosshair" : "pointer",
+        cursor: dragDisplay ? "col-resize" : "pointer",
       }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
