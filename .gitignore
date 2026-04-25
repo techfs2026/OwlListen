@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ── Node ──────────────────────────────────────────────────────────────────────
 node_modules/
 dist/
@@ -41,4 +42,12 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+=======
+﻿out/
+models/
+.vs/
+.DS_Store
+node_modules/
+src-tauri/
+>>>>>>> f7c0b96 (gitignore)
 whisper-models/
