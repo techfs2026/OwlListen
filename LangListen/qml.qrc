@@ -1,8 +1,0 @@
-<RCC>
-    <qresource prefix="/">
-        <file>qml/main.qml</file>
-        <file>qml/DictationModePanel.qml</file>
-        <file>qml/EditModePanel.qml</file>
-        <file>qml/PracticeModePanel.qml</file>
-    </qresource>
-</RCC>
