@@ -49,7 +49,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const offsetRef = useRef(0);
   const durationRef = useRef(0);
   const rafRef = useRef<number>(0);
-  
+
   // 增加 loadId 防抖，防止连续切换片段引发的数据竞态
   const currentLoadId = useRef(0);
 
@@ -86,7 +86,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     if (bufferCache.has(urlOrPath)) {
       return bufferCache.get(urlOrPath)!;
     }
-    
+
     const ctx = getCtx();
     const url = toFetchUrl(urlOrPath);
     const response = await fetch(url);
@@ -98,10 +98,10 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   }, [getCtx]);
 
   const prefetch = useCallback(async (urlOrPath: string): Promise<void> => {
-    try { 
-      await fetchAndDecode(urlOrPath); 
-    } catch (err) { 
-      console.warn("[useAudioPlayer] prefetch failed:", urlOrPath, err); 
+    try {
+      await fetchAndDecode(urlOrPath);
+    } catch (err) {
+      console.warn("[useAudioPlayer] prefetch failed:", urlOrPath, err);
     }
   }, [fetchAndDecode]);
 
@@ -137,22 +137,22 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     const ctx = getCtx();
     const buffer = bufferRef.current;
     if (!buffer) return; // loading 时 buffer 为 null，直接拦截非法触发
-  
+
     if (fromSec !== undefined) {
       offsetRef.current = Math.max(0, Math.min(fromSec, buffer.duration));
     }
-  
+
     // 同步触发 resume，不阻塞后续 start 的调度
     if (ctx.state === "suspended") {
-      ctx.resume().catch(console.warn); 
+      ctx.resume().catch(console.warn);
     }
-  
+
     stopSource();
-  
+
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(ctx.destination);
-  
+
     source.onended = () => {
       stopRaf();
       setCurrentTime(buffer.duration);
@@ -160,13 +160,13 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       isPlayingRef.current = false;
       setPlayState("ready");
     };
-  
+
     source.start(0, offsetRef.current);
-  
+
     sourceRef.current = source;
     startTimeRef.current = ctx.currentTime;
     isPlayingRef.current = true;
-  
+
     setPlayState("playing");
     rafRef.current = requestAnimationFrame(tick);
   }, [getCtx, stopSource, stopRaf, tick]);

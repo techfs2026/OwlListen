@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { C, FONT } from "@/styles";
 import type { ListenSegment, SegmentState, SegmentStatus } from "@/types/waveform";
 
@@ -30,6 +30,15 @@ export function SegmentSidebar({ segments, segStates, currentIndex, onSelect }: 
   const counts = { pending: 0, done: 0, flagged: 0 };
   for (const st of segStates.values()) counts[st.status]++;
 
+  const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  useEffect(() => {
+    itemRefs.current.get(currentIndex)?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  }, [currentIndex]);
+
   return (
     <div style={s.sidebar}>
       <div style={s.head}>片段列表</div>
@@ -42,6 +51,10 @@ export function SegmentSidebar({ segments, segStates, currentIndex, onSelect }: 
           return (
             <div
               key={seg.index}
+              ref={(el) => {
+                if (el) itemRefs.current.set(seg.index, el);
+                else itemRefs.current.delete(seg.index);
+              }}
               style={{
                 ...s.item,
                 background: isActive ? C.blueLt : "transparent",

@@ -20,13 +20,15 @@ interface PracticePanelProps {
 }
 
 // ── 键盘快捷键说明 ─────────────────────────────────────────────────────────────
-// Tab        播放 / 暂停（在 textarea 内也生效）
+// P          播放 / 暂停（在 textarea 内也生效）
 // R          从头重播
 // Enter      切换「对照原文 / Diff」（textarea 内 Shift+Enter 换行正常输入）
+// I          textarea 获得焦点（进入输入模式，类 Vim insert）
+// Escape     textarea 失去焦点（回到面板快捷键模式）
 // J          上一段
 // L          下一段
-// Escape     textarea 失去焦点（回到面板快捷键模式）
-// 点击听写框  获得焦点（输入文字）
+// D          标记完成并跳下一段
+// F          标记重听
 
 export function PracticePanel({
   segment,
@@ -53,13 +55,15 @@ export function PracticePanel({
 
   const playing = playState === "playing";
 
-  // ── 片段切换：加载新音频 ──────────────────────────────────────────────────
   useEffect(() => {
     if (audioUrl) load(audioUrl);
     setShowRef(false);
   }, [audioUrl]);
 
-  // ── 播放控制 ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (segment) panelRef.current?.focus();
+  }, [segment]);
+
   const handlePlay = useCallback(() => play(), [play]);
   const handlePause = useCallback(() => pause(), [pause]);
   const handleReplay = useCallback(() => play(0), [play]);
@@ -74,14 +78,33 @@ export function PracticePanel({
     fn();
   }, [pause]);
 
+  // ── 标记操作 ──────────────────────────────────────────────────────────────
+  const handleMarkDone = useCallback(() => {
+    onMarkStatus("done");
+    if (hasNext) navTo(onNext);
+  }, [onMarkStatus, hasNext, navTo, onNext]);
+
+  const handleMarkFlagged = useCallback(() => {
+    onMarkStatus("flagged");
+  }, [onMarkStatus]);
+
   // ── 全键盘操作 ─────────────────────────────────────────────────────────────
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const inTextarea = textareaFocused;
 
     switch (e.key) {
-      case "Tab": {
+      case "p":
+      case "P": {
+        if (inTextarea) break;
         e.preventDefault();
         handleTogglePlay();
+        break;
+      }
+      case "i":
+      case "I": {
+        if (inTextarea) break;
+        e.preventDefault();
+        textareaRef.current?.focus();
         break;
       }
       case "r":
@@ -92,7 +115,7 @@ export function PracticePanel({
         break;
       }
       case "Enter": {
-        if (inTextarea && !e.shiftKey) break;
+        if (inTextarea) break;   // 输入模式下 Enter / Shift+Enter 均正常输入，不拦截
         e.preventDefault();
         setShowRef((v) => !v);
         break;
@@ -111,6 +134,20 @@ export function PracticePanel({
         if (hasNext) navTo(onNext);
         break;
       }
+      case "d":
+      case "D": {
+        if (inTextarea) break;
+        e.preventDefault();
+        handleMarkDone();
+        break;
+      }
+      case "f":
+      case "F": {
+        if (inTextarea) break;
+        e.preventDefault();
+        handleMarkFlagged();
+        break;
+      }
       case "Escape": {
         if (inTextarea) {
           textareaRef.current?.blur();
@@ -122,6 +159,7 @@ export function PracticePanel({
   }, [
     textareaFocused, handleTogglePlay, handleReplay,
     hasPrev, hasNext, navTo, onPrev, onNext,
+    handleMarkDone, handleMarkFlagged,
   ]);
 
   // ── 渲染 ───────────────────────────────────────────────────────────────────
@@ -149,12 +187,15 @@ export function PracticePanel({
         {segment.label && <span style={s.segLabel}>{segment.label}</span>}
         <span style={s.segDur}>{(segment.end - segment.start).toFixed(1)}s</span>
         <div style={s.kbdRow}>
-          <KbdHint keys={["Tab"]} label="播放/暂停" />
+          <KbdHint keys={["P"]} label="播放/暂停" />
           <KbdHint keys={["R"]} label="重播" />
           <KbdHint keys={["Enter"]} label="对照" />
+          <KbdHint keys={["I"]} label="输入" />
+          <KbdHint keys={["Esc"]} label="退出输入" />
           <KbdHint keys={["J"]} label="上一段" />
           <KbdHint keys={["L"]} label="下一段" />
-          <KbdHint keys={["Esc"]} label="退出输入" />
+          <KbdHint keys={["D"]} label="完成" />
+          <KbdHint keys={["F"]} label="标记重听" />
         </div>
       </div>
 
@@ -223,11 +264,11 @@ export function PracticePanel({
 
       {/* 操作按钮 */}
       <div style={s.controls}>
-        <Btn variant="success" onClick={() => { onMarkStatus("done"); hasNext && navTo(onNext); }}>
-          ✓ 完成
+        <Btn variant="success" onClick={handleMarkDone}>
+          ✓ 完成 <KbdTag>D</KbdTag>
         </Btn>
-        <Btn variant="danger" onClick={() => onMarkStatus("flagged")}>
-          ⚑ 标记重听
+        <Btn variant="danger" onClick={handleMarkFlagged}>
+          ⚑ 标记重听 <KbdTag>F</KbdTag>
         </Btn>
         <div style={{ flex: 1 }} />
         <Btn variant="ghost" onClick={() => navTo(onPrev)} disabled={!hasPrev}>
