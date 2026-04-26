@@ -1,13 +1,18 @@
 {
-    "identifier": "default",
-    "description": "Default capabilities",
-    "windows": ["main"],
-    "permissions": [
-      "core:default",
-      "dialog:allow-open",
-      "dialog:allow-save",
-      "fs:allow-read-file",
-      "fs:allow-write-file",
-      "fs:allow-read-dir"
-    ]
-  }
+  "identifier": "default",
+  "description": "Default capabilities",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-read-dir",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-is-fullscreen",
+    "core:window:allow-set-focus"
+  ]
+}

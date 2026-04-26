@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { C, FONT } from "@/styles";
 import { Btn, MiniPlayer } from "@/components/shared/Primitives";
 import { DiffView } from "./DiffView";
@@ -44,9 +45,13 @@ export function PracticePanel({
 }: PracticePanelProps) {
   const [showRef, setShowRef] = useState(false);
   const [textareaFocused, setTextareaFocused] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // ref 版本，供不依赖 re-render 的回调（onFocusChanged、resize 事件）读取
+  const textareaFocusedRef = useRef(false);
 
   const {
     playState, currentTime, duration,
@@ -55,15 +60,48 @@ export function PracticePanel({
 
   const playing = playState === "playing";
 
+  // ── textarea 焦点状态同步到 ref ──────────────────────────────────────────
+  const handleTextareaFocus = useCallback(() => {
+    setTextareaFocused(true);
+    textareaFocusedRef.current = true;
+  }, []);
+
+  const handleTextareaBlur = useCallback(() => {
+    setTextareaFocused(false);
+    textareaFocusedRef.current = false;
+  }, []);
+
+  // ── 片段切换：加载新音频 ──────────────────────────────────────────────────
   useEffect(() => {
     if (audioUrl) load(audioUrl);
     setShowRef(false);
   }, [audioUrl]);
 
+  // ── 自动聚焦面板，确保键盘快捷键开箱即用 ────────────────────────────────
   useEffect(() => {
     if (segment) panelRef.current?.focus();
   }, [segment]);
 
+  // ── 窗口焦点恢复 & 全屏切换后重新聚焦 ───────────────────────────────────
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let unlistenFocus: (() => void) | undefined;
+    let unlistenResize: (() => void) | undefined;
+
+    // 应用切换回来时恢复焦点
+    win.onFocusChanged(({ payload: focused }) => {
+      if (focused && !textareaFocusedRef.current) {
+        panelRef.current?.focus();
+      }
+    }).then((fn) => { unlistenFocus = fn; });
+
+    return () => {
+      unlistenFocus?.();
+      unlistenResize?.();
+    };
+  }, []); // 无依赖，只注册一次，通过 ref 读取最新状态
+
+  // ── 播放控制 ──────────────────────────────────────────────────────────────
   const handlePlay = useCallback(() => play(), [play]);
   const handlePause = useCallback(() => pause(), [pause]);
   const handleReplay = useCallback(() => play(0), [play]);
@@ -78,6 +116,50 @@ export function PracticePanel({
     fn();
   }, [pause]);
 
+  // PracticePanel.tsx 内部
+
+  const handleToggleFullscreen = useCallback(async () => {
+    const win = getCurrentWindow();
+    const isNowFs = await win.isFullscreen();
+    const nextFs = !isNowFs;
+
+    // 1. 先切换全屏状态
+    await win.setFullscreen(nextFs);
+    setIsFullscreen(nextFs);
+
+    // 2. 定义一个核心的“焦点抓取”函数
+    const forceRecoverFocus = async () => {
+
+      try {
+        // 步骤 A: 强行拉起系统窗口焦点（解决叮叮响的关键）
+        await win.setFocus();
+
+        // 步骤 B: 强行唤醒 Webview 内部环境
+        window.focus();
+
+        // 步骤 C: 重新定向 DOM 焦点
+        if (!textareaFocusedRef.current && panelRef.current) {
+          panelRef.current.blur(); // 先重置
+          panelRef.current.focus(); // 后聚焦
+        }
+      } catch (e) {
+        // 忽略可能的权限报错
+      }
+    };
+
+    // 3. 退出全屏时，启动“三段式”恢复频率
+    // 不同的电脑和系统（macOS/Win）全屏动画时长不同，用三个频率覆盖它们
+    if (!nextFs) {
+      setTimeout(forceRecoverFocus, 200);  // 动画初期尝试
+      setTimeout(forceRecoverFocus, 500);  // 动画结束尝试（大部分情况在此生效）
+      setTimeout(forceRecoverFocus, 1000); // 兜底尝试
+    }
+  }, [setIsFullscreen]); // 移除不必要的依赖，保持函数引用稳定
+
+  useEffect(() => {
+    getCurrentWindow().isFullscreen().then(setIsFullscreen);
+  }, []);
+
   // ── 标记操作 ──────────────────────────────────────────────────────────────
   const handleMarkDone = useCallback(() => {
     onMarkStatus("done");
@@ -89,78 +171,118 @@ export function PracticePanel({
   }, [onMarkStatus]);
 
   // ── 全键盘操作 ─────────────────────────────────────────────────────────────
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const inTextarea = textareaFocused;
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      console.log("keydown:", e.key, "activeElement:", document.activeElement?.tagName);
+      const inTextarea =
+        document.activeElement === textareaRef.current;
 
-    switch (e.key) {
-      case "p":
-      case "P": {
-        if (inTextarea) break;
-        e.preventDefault();
-        handleTogglePlay();
-        break;
+      switch (e.key) {
+        case "p":
+        case "P": {
+          if (inTextarea) break;
+          e.preventDefault();
+          handleTogglePlay();
+          break;
+        }
+        case "r":
+        case "R": {
+          if (inTextarea) break;
+          e.preventDefault();
+          handleReplay();
+          break;
+        }
+        case "Enter": {
+          if (inTextarea) break;
+          e.preventDefault();
+          setShowRef((v) => !v);
+          break;
+        }
+        case "j":
+        case "J": {
+          if (inTextarea) break;
+          e.preventDefault();
+          if (hasPrev) navTo(onPrev);
+          break;
+        }
+        case "l":
+        case "L": {
+          if (inTextarea) break;
+          e.preventDefault();
+          if (hasNext) navTo(onNext);
+          break;
+        }
+        case "d":
+        case "D": {
+          if (inTextarea) break;
+          e.preventDefault();
+          handleMarkDone();
+          break;
+        }
+        case "f":
+        case "F": {
+          if (inTextarea) break;
+          e.preventDefault();
+          handleMarkFlagged();
+          break;
+        }
+        case "z":
+        case "Z": {
+          if (inTextarea) break;
+          e.preventDefault();
+          handleToggleFullscreen();
+          break;
+        }
+        case "h":
+        case "H": {
+          if (inTextarea) break;
+          e.preventDefault();
+          setShowHelp((v) => !v);
+          break;
+        }
+        case "i":
+        case "I": {
+          if (inTextarea) break;
+          e.preventDefault();
+          textareaRef.current?.focus();
+          break;
+        }
+        case "Escape": {
+          e.preventDefault();
+
+          if (showHelp) {
+            setShowHelp(false);
+            return;
+          }
+
+          if (inTextarea) {
+            textareaRef.current?.blur();
+          }
+          break;
+        }
       }
-      case "i":
-      case "I": {
-        if (inTextarea) break;
-        e.preventDefault();
-        textareaRef.current?.focus();
-        break;
-      }
-      case "r":
-      case "R": {
-        if (inTextarea) break;
-        e.preventDefault();
-        handleReplay();
-        break;
-      }
-      case "Enter": {
-        if (inTextarea) break;   // 输入模式下 Enter / Shift+Enter 均正常输入，不拦截
-        e.preventDefault();
-        setShowRef((v) => !v);
-        break;
-      }
-      case "j":
-      case "J": {
-        if (inTextarea) break;
-        e.preventDefault();
-        if (hasPrev) navTo(onPrev);
-        break;
-      }
-      case "l":
-      case "L": {
-        if (inTextarea) break;
-        e.preventDefault();
-        if (hasNext) navTo(onNext);
-        break;
-      }
-      case "d":
-      case "D": {
-        if (inTextarea) break;
-        e.preventDefault();
-        handleMarkDone();
-        break;
-      }
-      case "f":
-      case "F": {
-        if (inTextarea) break;
-        e.preventDefault();
-        handleMarkFlagged();
-        break;
-      }
-      case "Escape": {
-        if (inTextarea) {
-          textareaRef.current?.blur();
+    };
+
+    window.addEventListener("keydown", handler);
+
+    // 监听窗口重新获得焦点的全局事件
+    const win = getCurrentWindow();
+    const unlisten = win.onFocusChanged(({ payload: focused }) => {
+      if (focused) {
+        // 只要窗口被激活，就强行把焦点拉回到 Webview 和 Panel
+        window.focus();
+        if (!textareaFocusedRef.current) {
           panelRef.current?.focus();
         }
-        break;
       }
-    }
-  }, [
-    textareaFocused, handleTogglePlay, handleReplay,
-    hasPrev, hasNext, navTo, onPrev, onNext,
-    handleMarkDone, handleMarkFlagged,
-  ]);
+    });
+
+    return () => {
+      window.removeEventListener("keydown", handler);
+      unlisten.then(fn => fn());
+    };
+    // 注意：只保留最稳定的依赖，或者使用 Ref 来引用变动的值
+  }, [handleTogglePlay, handleReplay, hasPrev, hasNext, navTo, onPrev, onNext, handleMarkDone, handleMarkFlagged, handleToggleFullscreen, showHelp]);
 
   // ── 渲染 ───────────────────────────────────────────────────────────────────
 
@@ -178,24 +300,20 @@ export function PracticePanel({
     <div
       ref={panelRef}
       style={s.main}
-      tabIndex={-1}
-      onKeyDown={handleKeyDown}
+      tabIndex={0}
     >
-      {/* 片段信息 + 快捷键提示 */}
+      {/* 片段信息 */}
       <div style={s.segInfo}>
         <span style={s.segNum}>片段 #{segment.index + 1} / {totalCount}</span>
         {segment.label && <span style={s.segLabel}>{segment.label}</span>}
         <span style={s.segDur}>{(segment.end - segment.start).toFixed(1)}s</span>
-        <div style={s.kbdRow}>
-          <KbdHint keys={["P"]} label="播放/暂停" />
-          <KbdHint keys={["R"]} label="重播" />
-          <KbdHint keys={["Enter"]} label="对照" />
-          <KbdHint keys={["I"]} label="输入" />
-          <KbdHint keys={["Esc"]} label="退出输入" />
-          <KbdHint keys={["J"]} label="上一段" />
-          <KbdHint keys={["L"]} label="下一段" />
-          <KbdHint keys={["D"]} label="完成" />
-          <KbdHint keys={["F"]} label="标记重听" />
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <Btn variant="ghost" size="sm" onClick={() => setShowHelp(true)} style={{ fontSize: 12 }}>
+            快捷键 <KbdTag>H</KbdTag>
+          </Btn>
+          <Btn variant="ghost" size="sm" onClick={handleToggleFullscreen} style={{ fontSize: 12 }}>
+            {isFullscreen ? "退出全屏" : "全屏"} <KbdTag>Z</KbdTag>
+          </Btn>
         </div>
       </div>
 
@@ -229,8 +347,8 @@ export function PracticePanel({
           value={segState.userText}
           placeholder="点击此处输入，或直接开始打字…"
           onChange={(e) => onUpdateText(e.target.value)}
-          onFocus={() => setTextareaFocused(true)}
-          onBlur={() => setTextareaFocused(false)}
+          onFocus={handleTextareaFocus}
+          onBlur={handleTextareaBlur}
           rows={3}
         />
       </div>
@@ -278,33 +396,81 @@ export function PracticePanel({
           下一段 → <KbdTag>L</KbdTag>
         </Btn>
       </div>
+      {/* 快捷键帮助弹窗 */}
+      {showHelp && (
+        <div style={s.modalOverlay} onClick={() => setShowHelp(false)}>
+          <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={s.modalTitle}>键盘快捷键</div>
+            <div style={s.modalCols}>
+              {SHORTCUT_GROUPS.map((group) => (
+                <div key={group.group} style={s.modalColGroup}>
+                  <div style={s.modalGroup}>{group.group}</div>
+                  {group.items.map(({ key, label }) => (
+                    <div key={key} style={s.modalRow}>
+                      <kbd style={s.modalKbd}>{key}</kbd>
+                      <span style={s.modalLabel}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div style={s.modalFooter}>
+              按 <kbd style={s.modalKbd}>H</kbd> 或 <kbd style={s.modalKbd}>Esc</kbd> 关闭
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── 小组件 ────────────────────────────────────────────────────────────────────
+// ── 快捷键数据（按分组，两列排布）────────────────────────────────────────────
 
-function KbdHint({ keys, label }: { keys: string[]; label: string }) {
-  return (
-    <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
-      {keys.map((k) => (
-        <kbd key={k} style={{
-          fontFamily: FONT.mono,
-          fontSize: 10,
-          background: C.paper3,
-          border: `0.5px solid ${C.border2}`,
-          borderRadius: 3,
-          padding: "2px 5px",
-          color: C.ink2,
-          boxShadow: `0 1px 0 ${C.border2}`,
-        }}>
-          {k}
-        </kbd>
-      ))}
-      <span style={{ fontSize: 11, color: C.ink3 }}>{label}</span>
-    </span>
-  );
-}
+const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] }[] = [
+  {
+    group: "播放",
+    items: [
+      { key: "P", label: "播放 / 暂停" },
+      { key: "R", label: "从头重播" },
+    ],
+  },
+  {
+    group: "输入",
+    items: [
+      { key: "I", label: "进入输入模式" },
+      { key: "Esc", label: "退出输入模式" },
+    ],
+  },
+  {
+    group: "对照",
+    items: [
+      { key: "Enter", label: "对照 / 隐藏原文" },
+    ],
+  },
+  {
+    group: "导航",
+    items: [
+      { key: "J", label: "上一段" },
+      { key: "L", label: "下一段" },
+    ],
+  },
+  {
+    group: "标记",
+    items: [
+      { key: "D", label: "完成并跳下一段" },
+      { key: "F", label: "标记重听" },
+    ],
+  },
+  {
+    group: "界面",
+    items: [
+      { key: "Z", label: "切换全屏" },
+      { key: "H", label: "显示 / 隐藏帮助" },
+    ],
+  },
+];
+
+// ── 小组件 ────────────────────────────────────────────────────────────────────
 
 function KbdTag({ children }: { children: React.ReactNode }) {
   return (
@@ -361,7 +527,7 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: C.ink3,
   },
-  kbdRow: {
+  kbdRow: {  // kept for potential reuse
     display: "flex",
     alignItems: "center",
     gap: 14,
@@ -442,5 +608,88 @@ const s: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     marginTop: "auto",
     paddingTop: 8,
+  },
+  modalOverlay: {
+    position: "fixed" as const,
+    inset: 0,
+    background: "rgba(0,0,0,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 9999,
+  },
+  modalBox: {
+    background: C.paper,
+    border: `0.5px solid ${C.border}`,
+    borderRadius: 16,
+    padding: "32px 36px",
+    width: 580,
+    maxWidth: "90vw",
+    boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+  },
+  modalTitle: {
+    fontFamily: FONT.mono,
+    fontSize: 13,
+    letterSpacing: "0.10em",
+    textTransform: "uppercase" as const,
+    color: C.ink3,
+    marginBottom: 24,
+  },
+  modalCols: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "4px 32px",
+  },
+  modalColGroup: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 0,
+    marginBottom: 16,
+  },
+  modalGrid: {  // unused, kept for safety
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 4,
+  },
+  modalGroup: {
+    fontFamily: FONT.mono,
+    fontSize: 10,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase" as const,
+    color: C.ink3,
+    marginBottom: 6,
+    borderBottom: `0.5px solid ${C.border}`,
+    paddingBottom: 4,
+  },
+  modalRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "5px 0",
+  },
+  modalKbd: {
+    fontFamily: FONT.mono,
+    fontSize: 11,
+    background: C.paper3,
+    border: `0.5px solid ${C.border2}`,
+    borderRadius: 4,
+    padding: "2px 8px",
+    color: C.ink2,
+    boxShadow: `0 1px 0 ${C.border2}`,
+    minWidth: 40,
+    textAlign: "center" as const,
+    flexShrink: 0,
+  },
+  modalLabel: {
+    fontSize: 13,
+    color: C.ink,
+    fontFamily: FONT.sans,
+  },
+  modalFooter: {
+    marginTop: 24,
+    fontSize: 12,
+    color: C.ink3,
+    fontFamily: FONT.mono,
+    textAlign: "center" as const,
   },
 };

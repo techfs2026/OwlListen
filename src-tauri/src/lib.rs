@@ -1,6 +1,6 @@
 mod audio;
-mod waveform;
 mod commands;
+mod waveform;
 
 use commands::AppState;
 
