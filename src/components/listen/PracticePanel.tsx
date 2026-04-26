@@ -3,6 +3,7 @@ import { C, FONT } from "@/styles";
 import { Btn, MiniPlayer } from "@/components/shared/Primitives";
 import { DiffView } from "./DiffView";
 import { computeDiff } from "@/hooks/useDiff";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import type { ListenSegment, SegmentState, SegmentStatus } from "@/types/waveform";
 
 interface PracticePanelProps {
@@ -39,115 +40,41 @@ export function PracticePanel({
   hasPrev,
   hasNext,
 }: PracticePanelProps) {
-  // playing / duration 由 audio 事件驱动；currentTime 由常驻 RAF 驱动
-  const [playing, setPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const [showRef, setShowRef] = useState(false);
   const [textareaFocused, setTextareaFocused] = useState(false);
 
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // ── 常驻 RAF：mount 时启动，unmount 时停止，和播放状态无关 ────────────────
-  // 始终读取 audio.currentTime，paused 时值不变，进度条自然静止，无需重启链条
+  const {
+    playState, currentTime, duration,
+    load, play, pause, seek,
+  } = useAudioPlayer();
 
+  const playing = playState === "playing";
+
+  // ── 片段切换：加载新音频 ──────────────────────────────────────────────────
   useEffect(() => {
-    let id: number;
-    const tick = () => {
-      const audio = audioRef.current;
-      if (audio) setCurrentTime(audio.currentTime);
-      id = requestAnimationFrame(tick);
-    };
-    id = requestAnimationFrame(tick);
-    console.log("[RAF] chain started, id=", id);
-    return () => {
-      console.log("[RAF] chain stopped, id=", id);
-      cancelAnimationFrame(id);
-    };
-  }, []); // 空依赖，只跑一次
-
-  // ── 片段切换：重置状态，重新加载音频 ──────────────────────────────────────
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    console.log("[segment] change → index=", segment?.index, "url=", audioUrl);
-    audio.pause();
-    audio.src = audioUrl ?? "";
-    audio.currentTime = 0;
-
-    setPlaying(false);
-    setDuration(0);
+    if (audioUrl) load(audioUrl);
     setShowRef(false);
-
-    if (audioUrl) audio.load();
-  }, [audioUrl, segment?.index]);
-
-  // ── 播放控制：只负责调用 audio API，状态由事件回调维护 ────────────────────
-
-  const handlePlay = useCallback(async () => {
-    const audio = audioRef.current;
-    if (!audio || !audioUrl) return;
-    console.log("audioUrl:", audioUrl);
-    console.log("[handlePlay] before play() currentTime=", audio.currentTime, "paused=", audio.paused);
-
-    audio.pause();
-    audio.currentTime = 0;
-    audio.load();
-    
-    try {
-      await audio.play();
-      console.log("[handlePlay] play() resolved currentTime=", audio.currentTime);
-    } catch (err) {
-      console.warn("[handlePlay] play() rejected", err);
-    }
   }, [audioUrl]);
 
-  const handlePause = useCallback(() => {
-    audioRef.current?.pause();
-    // onpause 事件会触发 setPlaying(false)
-  }, []);
-
+  // ── 播放控制 ──────────────────────────────────────────────────────────────
+  const handlePlay = useCallback(() => play(), [play]);
+  const handlePause = useCallback(() => pause(), [pause]);
+  const handleReplay = useCallback(() => play(0), [play]);
   const handleTogglePlay = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.paused ? handlePlay() : handlePause();
-  }, [handlePlay, handlePause]);
+    playing ? pause() : play();
+  }, [playing, play, pause]);
 
-  const handleSeek = useCallback((sec: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = sec;
-    // currentTime 由常驻 RAF 读取，无需手动 set
-  }, []);
-
-  const handleReplay = useCallback(async () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    console.log("[handleReplay] reload replay");
-
-    audio.pause();
-    audio.currentTime = 0;
-    audio.load();
-
-    try {
-      await audio.play();
-    } catch (e) {
-      console.warn(e);
-    }
-  }, []);
+  const handleSeek = useCallback((sec: number) => seek(sec), [seek]);
 
   const navTo = useCallback((fn: () => void) => {
-    handlePause();
+    pause();
     fn();
-  }, [handlePause]);
+  }, [pause]);
 
   // ── 全键盘操作 ─────────────────────────────────────────────────────────────
-
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const inTextarea = textareaFocused;
 
@@ -216,55 +143,6 @@ export function PracticePanel({
       tabIndex={-1}
       onKeyDown={handleKeyDown}
     >
-      {/*
-        audio 元素上只挂事件回调，完全不依赖外部 ref 手动同步状态。
-        所有播放状态变化的唯一来源是这里的事件。
-      */}
-      <audio
-        ref={audioRef}
-        onPlay={(e) => {
-          const a = e.target as HTMLAudioElement;
-
-          console.log("[audio] onPlay", performance.now());
-
-          requestAnimationFrame(() => {
-            console.log("[audio] first frame", performance.now(), a.currentTime);
-          });
-        }}
-        onPause={(e) => {
-          const a = e.target as HTMLAudioElement;
-          console.log("[audio] onPause currentTime=", a.currentTime, "duration=", a.duration);
-          setPlaying(false);
-        }}
-        onEnded={(e) => {
-          const a = e.target as HTMLAudioElement;
-
-          setPlaying(false);
-          a.currentTime = 0;
-        }}
-        onSeeking={(e) => {
-          const a = e.target as HTMLAudioElement;
-          console.log("[audio] onSeeking currentTime=", a.currentTime);
-        }}
-        onSeeked={(e) => {
-          const a = e.target as HTMLAudioElement;
-          console.log("[audio] onSeeked  currentTime=", a.currentTime);
-        }}
-        onWaiting={() => console.log("[audio] onWaiting (buffering)")}
-        onStalled={() => console.log("[audio] onStalled")}
-        onDurationChange={(e) => {
-          const d = (e.target as HTMLAudioElement).duration;
-          console.log("[audio] onDurationChange duration=", d);
-          if (isFinite(d) && d > 0) setDuration(d);
-        }}
-        onLoadedMetadata={(e) => {
-          const d = (e.target as HTMLAudioElement).duration;
-          console.log("[audio] onLoadedMetadata duration=", d);
-          if (isFinite(d) && d > 0) setDuration(d);
-        }}
-        preload="metadata"
-      />
-
       {/* 片段信息 + 快捷键提示 */}
       <div style={s.segInfo}>
         <span style={s.segNum}>片段 #{segment.index + 1} / {totalCount}</span>
@@ -285,7 +163,7 @@ export function PracticePanel({
         playing={playing}
         currentTime={currentTime}
         duration={duration}
-        disabled={!audioUrl}
+        disabled={!audioUrl || playState === "loading"}
         onPlay={handlePlay}
         onPause={handlePause}
         onSeek={handleSeek}
