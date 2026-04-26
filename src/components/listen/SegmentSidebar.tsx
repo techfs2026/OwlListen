@@ -93,7 +93,7 @@ export function SegmentSidebar({ segments, segStates, currentIndex, onSelect }: 
 
 const s: Record<string, React.CSSProperties> = {
   sidebar: {
-    width: 240,             // 188 → 240，给文字更多空间
+    width: 264,
     flexShrink: 0,
     display: "flex",
     flexDirection: "column",
@@ -102,9 +102,9 @@ const s: Record<string, React.CSSProperties> = {
     overflow: "hidden",
   },
   head: {
-    padding: "14px 18px 8px",
+    padding: "16px 20px 10px",
     fontFamily: FONT.mono,
-    fontSize: 11,           // 9 → 11
+    fontSize: 11,
     letterSpacing: "0.10em",
     textTransform: "uppercase" as const,
     color: C.ink3,
@@ -115,7 +115,7 @@ const s: Record<string, React.CSSProperties> = {
     overflowY: "auto",
   },
   item: {
-    padding: "12px 18px",   // 8px → 12px，更多呼吸感
+    padding: "13px 20px",
     cursor: "pointer",
     borderLeft: "3px solid transparent",
     transition: "background 0.1s, border-color 0.1s",
@@ -124,27 +124,27 @@ const s: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 4,        // 2 → 4
+    marginBottom: 5,
   },
   itemNum: {
     fontFamily: FONT.mono,
-    fontSize: 14,           // 10 → 14，片段编号要显眼
+    fontSize: 15,
     fontWeight: 600,
   },
   statusDot: {
     display: "inline-block",
-    width: 8,
-    height: 8,
+    width: 9,
+    height: 9,
     borderRadius: "50%",
     flexShrink: 0,
   },
   itemTime: {
     fontFamily: FONT.mono,
-    fontSize: 12,           // 10 → 12
+    fontSize: 12,
     color: C.ink3,
   },
   itemLabel: {
-    fontSize: 12,           // 10 → 12
+    fontSize: 13,
     color: C.ink2,
     marginTop: 3,
     overflow: "hidden",
@@ -152,18 +152,18 @@ const s: Record<string, React.CSSProperties> = {
     whiteSpace: "nowrap" as const,
   },
   legend: {
-    padding: "14px 18px",   // 10px → 14px
+    padding: "14px 20px",
     borderTop: `0.5px solid ${C.border}`,
     display: "flex",
     flexDirection: "column",
-    gap: 8,                 // 5 → 8
+    gap: 8,
     flexShrink: 0,
   },
   legendRow: {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    fontSize: 12,           // 10 → 12
+    fontSize: 12,
     fontFamily: FONT.mono,
     color: C.ink3,
   },

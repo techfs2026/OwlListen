@@ -14,8 +14,6 @@ interface UseAudioPlayerReturn {
   seek: (sec: number) => void;
   toggle: () => void;
   unload: () => void;
-  // 兼容旧接口
-  loadFile: (path: string) => Promise<void>;
 }
 
 // ── 内部工具：路径 → 可 fetch 的 URL ─────────────────────────────────────────
@@ -238,6 +236,5 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     seek,
     toggle,
     unload,
-    loadFile,
   };
 }

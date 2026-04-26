@@ -39,7 +39,7 @@ export function ExportPanel({ progress, onClose, onReveal }: ExportPanelProps) {
       <Card style={{ width: 360, padding: "24px 28px", display: "flex", flexDirection: "column", gap: 16 }}>
         {/* 标题行 */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontFamily: FONT.sans, fontSize: 15, fontWeight: 700, color: C.ink, letterSpacing: "-0.3px" }}>
+          <span style={{ fontFamily: FONT.sans, fontSize: 16, fontWeight: 700, color: C.ink, letterSpacing: "-0.3px" }}>
             {isDone ? "✓ 导出完成" : isError ? "✗ 导出失败" : "正在导出…"}
           </span>
           {isFinished && (
@@ -116,7 +116,7 @@ function StepRow({ icon, label, state }: { icon: string; label: string; state: "
         {state === "done" ? "✓" : state === "active" ? <Spinner /> : icon}
       </span>
       <span style={{
-        fontSize: 13,
+        fontSize: 14,
         color: state === "active" ? C.ink : state === "done" ? C.ink2 : C.ink3,
         fontWeight: state === "active" ? 600 : 400,
       }}>

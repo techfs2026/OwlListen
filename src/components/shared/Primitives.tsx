@@ -20,14 +20,14 @@ const BTN_STYLES: Record<BtnVariant, React.CSSProperties> = {
 };
 
 export function Btn({ variant = "default", size = "md", style, children, ...rest }: BtnProps) {
-  const pad = size === "sm" ? "3px 9px" : "5px 12px";
+  const pad = size === "sm" ? "5px 12px" : "7px 16px";
   return (
     <button
       style={{
         fontFamily: FONT.sans,
-        fontSize: size === "sm" ? 11 : 12,
+        fontSize: size === "sm" ? 12 : 13,
         fontWeight: 500,
-        borderRadius: 6,
+        borderRadius: 7,
         padding: pad,
         cursor: "pointer",
         whiteSpace: "nowrap",
@@ -105,11 +105,11 @@ export function Badge({ children, color = "blue" }: BadgeProps) {
     <span style={{
       display: "inline-block",
       fontFamily: FONT.mono,
-      fontSize: 9,
+      fontSize: 10,
       letterSpacing: "0.10em",
       textTransform: "uppercase",
-      padding: "2px 8px",
-      borderRadius: 3,
+      padding: "3px 10px",
+      borderRadius: 4,
       background: bg,
       color: fg,
     }}>
@@ -168,7 +168,7 @@ export function MiniPlayer({ playing, currentTime, duration, disabled, onPlay, o
         </div>
       </div>
 
-      <span style={{ fontFamily: FONT.mono, fontSize: 11, color: C.ink3, whiteSpace: "nowrap" }}>
+      <span style={{ fontFamily: FONT.mono, fontSize: 12, color: C.ink3, whiteSpace: "nowrap" }}>
         {fmt(currentTime)} / {fmt(duration)}
       </span>
 

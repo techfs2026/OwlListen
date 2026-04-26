@@ -249,18 +249,18 @@ function KbdHint({ keys, label }: { keys: string[]; label: string }) {
       {keys.map((k) => (
         <kbd key={k} style={{
           fontFamily: FONT.mono,
-          fontSize: 9,
+          fontSize: 10,
           background: C.paper3,
           border: `0.5px solid ${C.border2}`,
           borderRadius: 3,
-          padding: "1px 4px",
+          padding: "2px 5px",
           color: C.ink2,
           boxShadow: `0 1px 0 ${C.border2}`,
         }}>
           {k}
         </kbd>
       ))}
-      <span style={{ fontSize: 9.5, color: C.ink3 }}>{label}</span>
+      <span style={{ fontSize: 11, color: C.ink3 }}>{label}</span>
     </span>
   );
 }
@@ -289,48 +289,48 @@ const s: Record<string, React.CSSProperties> = {
     flex: 1,
     display: "flex",
     flexDirection: "column",
-    padding: "32px 48px",
-    gap: 24,
+    padding: "36px 56px",
+    gap: 28,
     overflowY: "auto",
     outline: "none",
   },
   segInfo: {
     display: "flex",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
     flexWrap: "wrap" as const,
   },
   segNum: {
     fontFamily: FONT.mono,
-    fontSize: 18,
+    fontSize: 20,
     color: C.blue,
     fontWeight: 700,
     letterSpacing: "-0.01em",
   },
   segLabel: {
-    fontSize: 13,
+    fontSize: 14,
     color: C.ink2,
     background: C.paper2,
     border: `0.5px solid ${C.border2}`,
-    borderRadius: 5,
-    padding: "3px 10px",
+    borderRadius: 6,
+    padding: "4px 12px",
   },
   segDur: {
     fontFamily: FONT.mono,
-    fontSize: 12,
+    fontSize: 13,
     color: C.ink3,
   },
   kbdRow: {
     display: "flex",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
     marginLeft: "auto",
     flexWrap: "wrap" as const,
   },
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: 10,
+    gap: 12,
     flexShrink: 0,
   },
   sectionLabel: {
@@ -348,7 +348,7 @@ const s: Record<string, React.CSSProperties> = {
     color: C.blue,
     background: C.blueLt,
     borderRadius: 3,
-    padding: "1px 7px",
+    padding: "2px 8px",
     fontFamily: FONT.mono,
     letterSpacing: "0.04em",
   },
@@ -356,9 +356,9 @@ const s: Record<string, React.CSSProperties> = {
     width: "100%",
     border: `0.5px solid ${C.border2}`,
     borderRadius: 12,
-    padding: "16px 20px",
+    padding: "18px 22px",
     fontFamily: FONT.sans,
-    fontSize: 17,
+    fontSize: 18,
     color: C.ink,
     background: C.paper,
     outline: "none",
@@ -375,8 +375,8 @@ const s: Record<string, React.CSSProperties> = {
     background: C.paper2,
     border: `0.5px solid ${C.border}`,
     borderRadius: 12,
-    padding: "16px 20px",
-    fontSize: 17,
+    padding: "18px 22px",
+    fontSize: 18,
     color: C.ink,
     lineHeight: 1.9,
     fontFamily: FONT.sans,

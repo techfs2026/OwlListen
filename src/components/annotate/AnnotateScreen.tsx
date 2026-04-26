@@ -29,7 +29,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   const {
     playState, currentTime, duration: playerDuration,
-    loadFile: loadAudio, play, pause, seek, unload: unloadAudio,
+    load: loadAudio, play, pause, seek, unload: unloadAudio,
   } = useAudioPlayer();
 
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
