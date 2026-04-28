@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::audio::decode_audio;
-use crate::waveform::{build_summary, extract_peaks, ViewRange};
+use crate::waveform::{self, builder, ViewRange};
 
 // ── AppState ──────────────────────────────────────────────────────────────────
 
@@ -27,13 +27,16 @@ impl AppState {
 // ── 数据类型 ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioInfoDto {
     pub duration: f64,
     pub sample_rate: u32,
     pub level_count: usize,
+    pub channel_count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct PeakViewDto {
     pub start_sec: f64,
     pub end_sec: f64,
@@ -47,17 +50,51 @@ pub struct LabelDto {
     pub text: String,
 }
 
+// ── 渲染数据 DTO（与前端 RenderData 一一对应）─────────────────────────────────
+//
+// mode 决定 channels 里每个元素的形状:
+//   "envelope" → ChannelEnvelope { peaks: [{min, max, rms}, ...] }
+//   "polyline" / "stem" → ChannelPolyline { points: [[x, y], ...] }
+//
+// 用 internally tagged enum,前端 JSON 看起来是:
+//   { "kind": "envelope", "peaks": [...] }
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ChannelDataDto {
+    Envelope { peaks: Vec<PeakDto> },
+    Polyline { points: Vec<[f32; 2]> },
+    Stem     { points: Vec<[f32; 2]> },
+}
+
+#[derive(Debug, Serialize)]
+pub struct PeakDto {
+    pub min: f32,
+    pub max: f32,
+    pub rms: f32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderDataDto {
+    /// "envelope" | "polyline" | "stem"
+    pub mode: &'static str,
+    pub channels: Vec<ChannelDataDto>,
+    pub pixel_width: usize,
+}
+
 // ── 已有命令 ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
 pub fn load_audio(path: String, state: State<AppState>) -> Result<AudioInfoDto, String> {
     let audio = decode_audio(&path, 22050).map_err(|e| e.to_string())?;
-    let summary = build_summary(&audio);
+    let summary = builder::build_summary(&audio);
 
     let dto = AudioInfoDto {
         duration: audio.duration_secs(),
-        sample_rate: audio.sample_rate,
+        sample_rate: audio.sample_rate(),
         level_count: summary.level_count(),
+        channel_count: audio.channel_count(),
     };
 
     *state.summary.lock().unwrap() = Some(summary);
@@ -67,7 +104,7 @@ pub fn load_audio(path: String, state: State<AppState>) -> Result<AudioInfoDto, 
 }
 
 #[tauri::command]
-pub fn get_peaks(view: PeakViewDto, state: State<AppState>) -> Result<Vec<u8>, String> {
+pub fn get_peaks(view: PeakViewDto, state: State<AppState>) -> Result<RenderDataDto, String> {
     let guard = state.summary.lock().unwrap();
     let summary = guard.as_ref().ok_or("No audio loaded")?;
 
@@ -77,15 +114,39 @@ pub fn get_peaks(view: PeakViewDto, state: State<AppState>) -> Result<Vec<u8>, S
         pixel_width: view.pixel_width,
     };
 
-    let peaks = extract_peaks(summary, &range);
+    let render = waveform::extract(summary, &range);
 
-    // 序列化为 [f32 as le bytes]：[min0, max0, min1, max1, ...]
-    let mut bytes = Vec::with_capacity(peaks.len() * 8);
-    for p in &peaks {
-        bytes.extend_from_slice(&p.min.to_le_bytes());
-        bytes.extend_from_slice(&p.max.to_le_bytes());
-    }
-    Ok(bytes)
+    // 转成 DTO
+    let mode_str = match render.mode {
+        waveform::RenderMode::Envelope => "envelope",
+        waveform::RenderMode::Polyline => "polyline",
+        waveform::RenderMode::Stem => "stem",
+    };
+
+    let channels: Vec<ChannelDataDto> = render
+        .channels
+        .into_iter()
+        .map(|ch| match ch {
+            waveform::ChannelRenderData::Envelope(peaks) => ChannelDataDto::Envelope {
+                peaks: peaks
+                    .into_iter()
+                    .map(|p| PeakDto { min: p.min, max: p.max, rms: p.rms })
+                    .collect(),
+            },
+            waveform::ChannelRenderData::Polyline(pts) => ChannelDataDto::Polyline {
+                points: pts.into_iter().map(|(x, y)| [x, y]).collect(),
+            },
+            waveform::ChannelRenderData::Stem(pts) => ChannelDataDto::Stem {
+                points: pts.into_iter().map(|(x, y)| [x, y]).collect(),
+            },
+        })
+        .collect();
+
+    Ok(RenderDataDto {
+        mode: mode_str,
+        channels,
+        pixel_width: view.pixel_width,
+    })
 }
 
 #[tauri::command]
@@ -171,20 +232,43 @@ fn split_segment(
     let audio = crate::audio::decode_audio(input_path, target_sr)
         .with_context(|| format!("decode {input_path}"))?;
 
-    let sr = audio.sample_rate as f64;
-    let total = audio.samples.len();
+    let sr = audio.sample_rate() as f64;
+    // 多声道下混到 mono(Whisper 要 mono)
+    let mono = downmix_to_mono(&audio);
+    let total = mono.len();
 
     let start_sample = ((start_sec * sr).round() as usize).min(total);
-    let end_sample   = ((end_sec   * sr).round() as usize).min(total);
+    let end_sample = ((end_sec * sr).round() as usize).min(total);
 
     log::debug!(
         "split_segment [{:.3}s, {:.3}s] => samples [{}, {}) / {} total",
         start_sec, end_sec, start_sample, end_sample, total
     );
 
-    let slice = &audio.samples[start_sample..end_sample];
+    let slice = &mono[start_sample..end_sample];
     write_mp3(output_path, slice, target_sr)?;
     Ok(())
+}
+
+/// 把 DecodedAudio 的多个声道下混到单声道(立体声 → 平均)
+/// 单声道直接克隆返回,立体声 (L+R)/2
+fn downmix_to_mono(audio: &crate::audio::DecodedAudio) -> Vec<f32> {
+    let channels = audio.channel_count();
+    if channels == 1 {
+        return audio.channel(0).expect("ch 0").to_vec();
+    }
+    // 立体声 / 多声道:逐样本均值
+    let len = audio.samples_per_channel();
+    let mut out = Vec::with_capacity(len);
+    let inv = 1.0 / channels as f32;
+    for i in 0..len {
+        let mut sum = 0.0_f32;
+        for ch in 0..channels {
+            sum += audio.channel(ch).expect("ch in range")[i];
+        }
+        out.push(sum * inv);
+    }
+    out
 }
 
 /// 将 f32 PCM 样本编码为 MP3 并写入文件（ffmpeg-next / libmp3lame）
@@ -367,7 +451,9 @@ fn transcribe_one(
     // 用 decode_audio 解码（支持 MP3 / WAV / 任意 ffmpeg 格式），重采样到 16000 Hz
     let audio = crate::audio::decode_audio(wav_path, 16000)
         .with_context(|| format!("decode {wav_path}"))?;
-    let samples = audio.samples;
+    // Whisper 要 mono;如果切片是立体声(理论上 split_segment 已经下混,但 transcribe
+    // 也允许独立调用),这里再下混一次保证安全
+    let samples = downmix_to_mono(&audio);
 
     let mut state = ctx.create_state().context("create state")?;
     let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });

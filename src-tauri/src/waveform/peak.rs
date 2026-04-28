@@ -1,16 +1,46 @@
-/// 一段样本区间内的 [min, max]，各占 f32
+use std::sync::Arc;
+
+use crate::audio::decoder::RawSamples;
+
+/// 一段样本区间内的统计:
+/// - min/max: 振幅包络(峰值)
+/// - rms:     均方根(响度/能量)
 #[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]  // 保证内存布局：[min: f32, max: f32]，方便直接转 &[u8]
+#[repr(C)]
 pub struct Peak {
     pub min: f32,
     pub max: f32,
+    pub rms: f32,
 }
 
-/// 多级峰值金字塔
-/// levels[0] 最细（baseBlockSize 个样本 → 1 个 Peak）
-/// levels[n] 最粗（收敛到 1 个 Peak 时停止）
-pub struct WaveformSummary {
+impl Peak {
+    /// 用于"空区间"占位的零值 Peak
+    #[inline]
+    pub const fn zero() -> Self {
+        Self { min: 0.0, max: 0.0, rms: 0.0 }
+    }
+}
+
+/// 单个声道的多级峰值金字塔
+/// levels[0] 最细,levels[n] 最粗(收敛到 1 个 Peak 时停止)
+#[derive(Debug)]
+pub struct ChannelPyramid {
     pub levels: Vec<Vec<Peak>>,
+}
+
+impl ChannelPyramid {
+    pub fn level_count(&self) -> usize {
+        self.levels.len()
+    }
+}
+
+/// 多声道峰值金字塔总容器
+#[derive(Debug)]
+pub struct WaveformSummary {
+    /// 每声道一棵金字塔
+    pub channels: Vec<ChannelPyramid>,
+    /// 原始样本(共享所有权,服务于放大态的 Polyline / Stem 渲染)
+    pub raw: Arc<RawSamples>,
     pub sample_rate: u32,
     pub total_samples: u64,
     pub base_block_size: usize,
@@ -23,7 +53,13 @@ impl WaveformSummary {
     }
 
     pub fn is_valid(&self) -> bool {
-        !self.levels.is_empty() && self.total_samples > 0
+        !self.channels.is_empty()
+            && self.channels.iter().all(|c| !c.levels.is_empty())
+            && self.total_samples > 0
+    }
+
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
     }
 
     /// 第 level 层每个 Peak 对应的样本数
@@ -35,8 +71,11 @@ impl WaveformSummary {
         count
     }
 
-    /// 层数
+    /// 第一个声道的层数(所有声道层数相同)
     pub fn level_count(&self) -> usize {
-        self.levels.len()
+        self.channels
+            .first()
+            .map(|c| c.level_count())
+            .unwrap_or(0)
     }
 }

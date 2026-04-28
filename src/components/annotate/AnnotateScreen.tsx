@@ -10,6 +10,7 @@ import { useWaveform } from "@/hooks/useWaveform";
 import { useLabels } from "@/hooks/useLabels";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { splitAudio, transcribeSegments, buildZip, getTempDir } from "@/utils/tauriApi";
+import type { RenderData } from "@/types/waveform";
 
 interface AnnotateScreenProps {
   onBack: () => void;
@@ -32,7 +33,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     load: loadAudio, play, pause, seek, unload: unloadAudio,
   } = useAudioPlayer();
 
-  const [peaks, setPeaks] = useState<Float32Array | null>(null);
+  const [renderData, setRenderData] = useState<RenderData | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
 
@@ -41,15 +42,54 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   // ── 峰值刷新 ──────────────────────────────────────────────────────────────
 
-  const refreshPeaks = useCallback(async () => {
-    const container = containerRef.current;
-    if (!container || !audioInfo) return;
-    const dpr = window.devicePixelRatio || 1;
-    const pixelWidth = Math.floor(container.clientWidth * dpr);
-    if (pixelWidth <= 0) return;
-    const data = await fetchPeaks(pixelWidth);
-    if (data) setPeaks(data);
-  }, [audioInfo, fetchPeaks]);
+  // refreshPeaks 用 rAF 节流 + request id 防 race
+  // 滚轮高频触发时,每帧只发一个请求,且只接受最新一次的响应
+  const rafIdRef = useRef<number>(0);
+  const reqIdRef = useRef<number>(0);
+
+  const refreshPeaks = useCallback(() => {
+    // 每帧最多一次请求
+    if (rafIdRef.current) return;
+    rafIdRef.current = requestAnimationFrame(async () => {
+      rafIdRef.current = 0;
+      const container = containerRef.current;
+      if (!container || !audioInfo) return;
+      const dpr = window.devicePixelRatio || 1;
+      const pixelWidth = Math.floor(container.clientWidth * dpr);
+      if (pixelWidth <= 0) return;
+
+      const myReqId = ++reqIdRef.current;
+      const data = await fetchPeaks(pixelWidth);
+      // 已被更新的请求覆盖,丢弃
+      if (myReqId !== reqIdRef.current) return;
+
+      if (data) {
+        if (process.env.NODE_ENV !== "production") {
+          const ch0 = data.channels[0];
+          const len =
+            ch0?.kind === "envelope" ? ch0.peaks.length :
+            ch0?.kind === "polyline" || ch0?.kind === "stem" ? ch0.points.length : 0;
+          const dur = viewRange.endSec - viewRange.startSec;
+          const spp = (dur * (audioInfo?.sampleRate ?? 22050)) / pixelWidth;
+          console.log(
+            `[waveform] mode=${data.mode} channels=${data.channels.length} ` +
+            `len=${len} pixelWidth=${pixelWidth} spp=${spp.toFixed(2)} dur=${dur.toFixed(3)}s`
+          );
+        }
+        setRenderData(data);
+      }
+    });
+  }, [audioInfo, fetchPeaks, viewRange]);
+
+  // 卸载时取消挂起的 rAF
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = 0;
+      }
+    };
+  }, []);
 
   useEffect(() => { refreshPeaks(); }, [refreshPeaks]);
 
@@ -87,7 +127,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     });
     if (typeof path !== "string") return;
     audioPathRef.current = path;
-    setPeaks(null);
+    setRenderData(null);
     clearLabels();
     unloadAudio();
     await Promise.all([loadWaveform(path), loadAudio(path)]);
@@ -142,7 +182,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       if (!file) return;
       const path = (file as unknown as { path?: string }).path ?? file.name;
       audioPathRef.current = path;
-      setPeaks(null);
+      setRenderData(null);
       clearLabels();
       unloadAudio();
       await Promise.all([loadWaveform(path), loadAudio(path)]);
@@ -227,9 +267,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         {loadingState === "decoding" && (
           <EmptyState spinner title="解码中，请稍候…" />
         )}
-        {(loadingState === "ready" || peaks !== null) && (
+        {(loadingState === "ready" || renderData !== null) && (
           <WaveformCanvas
-            peaks={peaks}
+            data={renderData}
             viewRange={viewRange}
             duration={audioInfo?.duration ?? 0}
             playhead={currentTime}

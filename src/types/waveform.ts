@@ -4,12 +4,38 @@ export interface AudioInfo {
   duration: number;
   sampleRate: number;
   levelCount: number;
+  /** 1 = 单声道,2 = 立体声(>2 声道在解码时已下混为立体声) */
+  channelCount: number;
 }
 
 export interface LabelData {
   start: number;
   end: number;
   text: string;
+}
+
+// ── 渲染数据(从 Rust 命令返回)─────────────────────────────────────────────
+
+export type RenderMode = "envelope" | "polyline" | "stem";
+
+/** Envelope 模式下的单个像素峰值 */
+export interface Peak {
+  min: number;
+  max: number;
+  rms: number;
+}
+
+/** 单声道渲染数据(三种形态之一,由 kind 区分)*/
+export type ChannelData =
+  | { kind: "envelope"; peaks: Peak[] }
+  | { kind: "polyline"; points: Array<[number, number]> }
+  | { kind: "stem";     points: Array<[number, number]> };
+
+/** 一次 getPeaks 调用的完整返回 */
+export interface RenderData {
+  mode: RenderMode;
+  channels: ChannelData[];     // length === AudioInfo.channelCount
+  pixelWidth: number;
 }
 
 // ── 前端状态 ──────────────────────────────────────────────────────────────────
@@ -31,23 +57,32 @@ export type LoadingState = "idle" | "decoding" | "building" | "ready" | "error";
 // ── 渲染配置 ──────────────────────────────────────────────────────────────────
 
 export interface WaveformColors {
+  /** 包络外层(min/max,浅色)*/
   wave: string;
+  /** RMS 内层(深色,显示能量)*/
+  waveRms: string;
   playhead: string;
   labelFill: string;
   labelBorder: string;
   selection: string;
   background: string;
   centerLine?: string;
+  /** 立体声中间分隔线 */
+  channelDivider?: string;
 }
 
 export const DEFAULT_COLORS: WaveformColors = {
-  wave:        "#2563EB",
-  playhead:    "#1D4ED8",
-  labelFill:   "#BFDBFE",
-  labelBorder: "#3B82F6",
-  selection:   "#BAE6FD",
-  background:  "#FAFAF7",
-  centerLine:  "#C8D6F0",
+  // Audacity 经典波形配色 - 深蓝调
+  // 包络和 RMS 颜色相近,只靠"内层略深"区分层次
+  wave:           "#2C4A8C",   // 包络
+  waveRms:        "#2C4A8C",   // RMS
+  playhead:       "#1F2937",   // 接近黑的深灰
+  labelFill:      "#BFDBFE",
+  labelBorder:    "#3B82F6",
+  selection:      "#FDE68A",   // Audacity 选区是黄色
+  background:     "#F0F2F8",   // 极浅蓝灰,Audacity 主区域风格
+  centerLine:     "#1F2937",   // 接近黑细线
+  channelDivider: "#1F2937",   // 立体声分隔线
 };
 
 // ── WebGL 内部类型 ────────────────────────────────────────────────────────────
@@ -63,7 +98,7 @@ export interface GlResources {
 
 export interface ListenSegment {
   index: number;
-  /** ZIP 内的相对路径，e.g. "segments/0000.wav" */
+  /** ZIP 内的相对路径,e.g. "segments/0000.wav" */
   audio: string;
   start: number;
   end: number;

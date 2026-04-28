@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { loadAudio, getPeaks } from "@/utils/tauriApi";
-import type { AudioInfo, ViewRange, LoadingState } from "@/types/waveform";
+import type { AudioInfo, ViewRange, LoadingState, RenderData } from "@/types/waveform";
 
 interface UseWaveformReturn {
   audioInfo: AudioInfo | null;
@@ -9,8 +9,8 @@ interface UseWaveformReturn {
   viewRange: ViewRange;
   // 加载音频文件
   loadFile: (path: string) => Promise<void>;
-  // 获取当前视图的峰值（调用 Rust）
-  fetchPeaks: (pixelWidth: number) => Promise<Float32Array | null>;
+  // 获取当前视图的渲染数据(调用 Rust)
+  fetchPeaks: (pixelWidth: number) => Promise<RenderData | null>;
   // 视图控制
   setViewRange: (range: ViewRange) => void;
   zoomIn: (centerSec?: number) => void;
@@ -19,7 +19,7 @@ interface UseWaveformReturn {
   scrollBy: (deltaSec: number) => void;
 }
 
-const MIN_VISIBLE_SECS = 0.5;
+const MIN_VISIBLE_SECS = 0.001;  // 允许深度放大到 1ms 视图,触发 Polyline/Stem 模式
 
 export function useWaveform(): UseWaveformReturn {
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
@@ -30,7 +30,6 @@ export function useWaveform(): UseWaveformReturn {
     endSec: 30,
   });
 
-  // 用 ref 追踪最新的 audioInfo，避免闭包过时
   const audioInfoRef = useRef<AudioInfo | null>(null);
 
   const loadFile = useCallback(async (path: string) => {
@@ -50,22 +49,14 @@ export function useWaveform(): UseWaveformReturn {
     }
   }, []);
 
-  const fetchPeaks = useCallback(
-    async (pixelWidth: number): Promise<Float32Array | null> => {
-      if (!audioInfoRef.current) return null;
-      try {
-        return await getPeaks(
-          viewRange.startSec,
-          viewRange.endSec,
-          pixelWidth
-        );
-      } catch (err) {
-        console.error("getPeaks failed:", err);
-        return null;
-      }
-    },
-    [viewRange]
-  );
+  const reqIdRef = useRef(0);
+
+  const fetchPeaks = useCallback(async (pixelWidth: number) => {
+    const myId = ++reqIdRef.current;
+    const data = await getPeaks(viewRange.startSec, viewRange.endSec, pixelWidth);
+    if (myId !== reqIdRef.current) return null;  // 已被新请求覆盖
+    return data;
+  }, [viewRange]);
 
   const setViewRange = useCallback(
     (range: ViewRange) => {
@@ -84,7 +75,7 @@ export function useWaveform(): UseWaveformReturn {
         const dur = prev.endSec - prev.startSec;
         if (dur <= MIN_VISIBLE_SECS) return prev;
         const center = centerSec ?? prev.startSec + dur * 0.5;
-        const newDur = dur * 0.6;
+        const newDur = Math.max(dur * 0.6, MIN_VISIBLE_SECS);
         const start = Math.max(0, center - newDur * 0.5);
         const end = start + newDur;
         const duration = audioInfoRef.current?.duration ?? Infinity;

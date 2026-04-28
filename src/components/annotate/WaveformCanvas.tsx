@@ -1,10 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useWebGL } from "@/hooks/useWebGL";
-import type { Label, ViewRange, WaveformColors } from "@/types/waveform";
+import type { Label, RenderData, ViewRange, WaveformColors } from "@/types/waveform";
 import { DEFAULT_COLORS } from "@/types/waveform";
 
 interface WaveformCanvasProps {
-  peaks: Float32Array | null;
+  /** 来自 Rust 的渲染数据(三模式之一)*/
+  data: RenderData | null;
   viewRange: ViewRange;
   duration: number;
   playhead: number;
@@ -19,7 +20,7 @@ interface WaveformCanvasProps {
 const DRAG_THRESHOLD_PX = 6;
 
 export function WaveformCanvas({
-  peaks,
+  data,
   viewRange,
   duration,
   playhead,
@@ -106,7 +107,10 @@ export function WaveformCanvas({
   );
 
   const handleMouseLeave = useCallback(() => {
-    if (dragRef.current) { dragRef.current = null; setDragDisplay(null); }
+    if (dragRef.current) {
+      dragRef.current = null;
+      setDragDisplay(null);
+    }
   }, []);
 
   const handleWheel = useCallback(
@@ -124,20 +128,21 @@ export function WaveformCanvas({
   );
 
   useEffect(() => {
-    if (!peaks) return;
-    const playheadRatio = duration > 0 ? secToRatio(playhead) : 0;
+    const playheadRatio = duration > 0 ? secToRatio(playhead) : -1;
     const normalizedLabels = labels.map((l) => ({
       start: secToRatio(l.start),
       end: secToRatio(l.end),
     }));
-    render({ peaks, playhead: playheadRatio, dragRange: dragDisplay, labels: normalizedLabels, colors });
-  }, [peaks, playhead, duration, labels, dragDisplay, colors, render, secToRatio]);
+    render({ data, playhead: playheadRatio, dragRange: dragDisplay, labels: normalizedLabels, colors });
+  }, [data, playhead, duration, labels, dragDisplay, colors, render, secToRatio]);
 
   return (
     <canvas
       ref={canvasRef}
       style={{
-        width: "100%", height: "100%", display: "block",
+        width: "100%",
+        height: "100%",
+        display: "block",
         cursor: dragDisplay ? "col-resize" : "crosshair",
       }}
       onMouseDown={handleMouseDown}
