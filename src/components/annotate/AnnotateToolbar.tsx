@@ -107,6 +107,7 @@ export function AnnotateToolbar({
         size={30}
         onClick={playing ? onPause : onPlay}
       />
+      <kbd style={s.kbd}>P</kbd>
       <span style={s.time}>
         {formatTime(currentTime)}
         <span style={s.timeSep}>/</span>
@@ -182,6 +183,16 @@ const s: Record<string, React.CSSProperties> = {
     padding: "3px 9px",
     background: C.blueLt,
     borderRadius: 4,
+  },
+  kbd: {
+    fontFamily: FONT.mono,
+    fontSize: 10,
+    color: C.ink3,
+    background: C.paper2,
+    border: `0.5px solid ${C.border2}`,
+    borderRadius: 3,
+    padding: "1px 5px",
+    lineHeight: 1.2,
   },
   time: {
     fontFamily: FONT.mono,

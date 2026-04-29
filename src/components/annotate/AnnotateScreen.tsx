@@ -233,6 +233,28 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   const isPlaying = playState === "playing";
 
+  // ── 键盘快捷键 ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const el = document.activeElement as HTMLElement | null;
+      const inEditable =
+        el?.tagName === "INPUT" ||
+        el?.tagName === "TEXTAREA" ||
+        el?.isContentEditable === true;
+      if (inEditable) return;
+
+      if (e.key === "p" || e.key === "P") {
+        if (loadingState !== "ready") return;
+        e.preventDefault();
+        if (playState === "playing") pause();
+        else play();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [playState, play, pause, loadingState]);
+
   return (
     <div
       style={s.root}

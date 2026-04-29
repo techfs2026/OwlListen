@@ -202,52 +202,34 @@ pub fn split_audio(
     }
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
 
+    // 一次性解码 + 下混到 mono（Whisper 要 mono / 16 kHz）
+    // 之前每个 label 都重新解码整个文件，N 段 = N 次全量解码
+    let target_sr: u32 = 16000;
+    let audio = crate::audio::decode_audio(&audio_path, target_sr)
+        .map_err(|e| format!("decode {audio_path}: {e}"))?;
+    let sr = audio.sample_rate() as f64;
+    let mono = downmix_to_mono(&audio);
+    let total = mono.len();
+
     let mut segment_paths = Vec::with_capacity(labels.len());
 
     for (i, label) in labels.iter().enumerate() {
         let out_path = out_dir.join(format!("{:04}.mp3", i));
-        split_segment(&audio_path, label.start, label.end, &out_path)
+        let start_sample = ((label.start * sr).round() as usize).min(total);
+        let end_sample = ((label.end * sr).round() as usize).min(total).max(start_sample);
+
+        log::debug!(
+            "split_segment[{}] [{:.3}s, {:.3}s] => samples [{}, {}) / {} total",
+            i, label.start, label.end, start_sample, end_sample, total
+        );
+
+        let slice = &mono[start_sample..end_sample];
+        write_mp3(&out_path, slice, target_sr)
             .map_err(|e| format!("Segment {i}: {e}"))?;
         segment_paths.push(out_path.to_string_lossy().into_owned());
     }
 
     Ok(segment_paths)
-}
-
-/// 用 FFmpeg 从 [start_sec, end_sec) 提取片段并保存为 MP3
-///
-/// 策略：全量解码整个文件到 f32 PCM，然后按样本数精确裁剪。
-/// 避免 seek + pts 时间戳对齐的所有坑，对于几分钟到几十分钟的音频完全够用。
-fn split_segment(
-    input_path: &str,
-    start_sec: f64,
-    end_sec: f64,
-    output_path: &Path,
-) -> anyhow::Result<()> {
-    use anyhow::Context;
-
-    // decode_audio 已经做了全量解码 + 重采样到目标采样率
-    // 这里复用它，目标采样率用 16000（Whisper 标准）
-    let target_sr: u32 = 16000;
-    let audio = crate::audio::decode_audio(input_path, target_sr)
-        .with_context(|| format!("decode {input_path}"))?;
-
-    let sr = audio.sample_rate() as f64;
-    // 多声道下混到 mono(Whisper 要 mono)
-    let mono = downmix_to_mono(&audio);
-    let total = mono.len();
-
-    let start_sample = ((start_sec * sr).round() as usize).min(total);
-    let end_sample = ((end_sec * sr).round() as usize).min(total);
-
-    log::debug!(
-        "split_segment [{:.3}s, {:.3}s] => samples [{}, {}) / {} total",
-        start_sec, end_sec, start_sample, end_sample, total
-    );
-
-    let slice = &mono[start_sample..end_sample];
-    write_mp3(output_path, slice, target_sr)?;
-    Ok(())
 }
 
 /// 把 DecodedAudio 的多个声道下混到单声道(立体声 → 平均)
