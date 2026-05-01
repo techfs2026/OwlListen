@@ -75,8 +75,13 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     const ctx = getGlobalCtx();
     if (!ctx || !isPlayingRef.current) return;
 
-    const elapsed = ctx.currentTime - startTimeRef.current;
-    const pos = Math.min(offsetRef.current + elapsed, durationRef.current);
+    // ctx.currentTime 是调度时钟，实际听到的声音落后一个 outputLatency（系统音频缓冲 + 输出 pipeline）
+    // 不减就会导致播放头视觉上比耳朵超前；蓝牙耳机上尤其明显
+    // 部分 webkit 在音频刚启动时报 NaN，必须兜底
+    const rawLatency = ctx.outputLatency;
+    const latency = Number.isFinite(rawLatency) ? rawLatency : 0;
+    const elapsed = ctx.currentTime - startTimeRef.current - latency;
+    const pos = Math.min(offsetRef.current + Math.max(0, elapsed), durationRef.current);
     setCurrentTime(pos);
 
     rafRef.current = requestAnimationFrame(tick);
@@ -175,8 +180,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     if (!isPlayingRef.current) return;
     const ctx = getGlobalCtx();
 
-    const elapsed = ctx.currentTime - startTimeRef.current;
-    offsetRef.current = Math.min(offsetRef.current + elapsed, durationRef.current);
+    // 同 tick：减掉输出延迟，记录的是用户耳朵实际听到的位置
+    const rawLatency = ctx.outputLatency;
+    const latency = Number.isFinite(rawLatency) ? rawLatency : 0;
+    const elapsed = ctx.currentTime - startTimeRef.current - latency;
+    offsetRef.current = Math.min(offsetRef.current + Math.max(0, elapsed), durationRef.current);
 
     isPlayingRef.current = false;
     stopSource();
