@@ -5,29 +5,27 @@ export type PlayState = "idle" | "loading" | "ready" | "playing" | "paused";
 
 interface UseAudioPlayerReturn {
   playState: PlayState;
-  currentTime: number;       // 当前播放位置（秒）
-  duration: number;          // 音频总时长（秒）
-  load: (urlOrPath: string) => Promise<void>;   // 统一入口：blob URL / http URL / 本地路径均可
-  prefetch: (urlOrPath: string) => Promise<void>; // 预加载但不切换当前播放
+  currentTime: number;
+  duration: number;
+  loopRange: [number, number] | null;
+  load: (urlOrPath: string) => Promise<void>;
+  prefetch: (urlOrPath: string) => Promise<void>;
   play: (fromSec?: number) => void;
   pause: () => void;
   seek: (sec: number) => void;
   toggle: () => void;
   unload: () => void;
+  setLoop: (range: [number, number] | null) => void;
 }
 
-// ── 内部工具：路径 → 可 fetch 的 URL ─────────────────────────────────────────
 function toFetchUrl(urlOrPath: string): string {
   return /^(blob:|https?:)/.test(urlOrPath)
     ? urlOrPath
     : convertFileSrc(urlOrPath);
 }
 
-// ── 全局缓存与全局 AudioContext（跨模块共享）──────────────────────────────────
-// key: 原始 urlOrPath，value: 解码完成的 AudioBuffer
 const bufferCache = new Map<string, AudioBuffer>();
 
-// 将 AudioContext 改为全局单例，避免触碰浏览器 6 个 Context 的上限
 let globalAudioContext: AudioContext | null = null;
 function getGlobalCtx(): AudioContext {
   if (!globalAudioContext || globalAudioContext.state === "closed") {
@@ -40,6 +38,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const [playState, setPlayState] = useState<PlayState>("idle");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [loopRange, setLoopRange] = useState<[number, number] | null>(null);
 
   const bufferRef = useRef<AudioBuffer | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
@@ -49,8 +48,8 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const offsetRef = useRef(0);
   const durationRef = useRef(0);
   const rafRef = useRef<number>(0);
+  const loopRangeRef = useRef<[number, number] | null>(null);
 
-  // 增加 loadId 防抖，防止连续切换片段引发的数据竞态
   const currentLoadId = useRef(0);
 
   const getCtx = useCallback(() => getGlobalCtx(), []);
@@ -71,27 +70,64 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     }
   }, []);
 
+  // keep loopRangeRef in sync
+  const setLoop = useCallback((range: [number, number] | null) => {
+    loopRangeRef.current = range;
+    setLoopRange(range);
+  }, []);
+
   const tick = useCallback(() => {
     const ctx = getGlobalCtx();
     if (!ctx || !isPlayingRef.current) return;
 
-    // ctx.currentTime 是调度时钟，实际听到的声音落后一个 outputLatency（系统音频缓冲 + 输出 pipeline）
-    // 不减就会导致播放头视觉上比耳朵超前；蓝牙耳机上尤其明显
-    // 部分 webkit 在音频刚启动时报 NaN，必须兜底
     const rawLatency = ctx.outputLatency;
     const latency = Number.isFinite(rawLatency) ? rawLatency : 0;
     const elapsed = ctx.currentTime - startTimeRef.current - latency;
     const pos = Math.min(offsetRef.current + Math.max(0, elapsed), durationRef.current);
     setCurrentTime(pos);
 
+    // Loop boundary check: if we've passed the loop end, restart the loop
+    const lr = loopRangeRef.current;
+    if (lr && pos >= lr[1] - latency) {
+      // restart from loop start — play() will re-schedule the source
+      offsetRef.current = lr[0];
+      isPlayingRef.current = false; // temporarily so play() doesn't double-start
+      stopSource();
+      stopRaf();
+
+      const buffer = bufferRef.current;
+      if (!buffer) return;
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+
+      source.onended = () => {
+        // only fire if we're NOT in a loop (loop restarts above handle it)
+        if (!loopRangeRef.current) {
+          stopRaf();
+          setCurrentTime(buffer.duration);
+          offsetRef.current = 0;
+          isPlayingRef.current = false;
+          setPlayState("ready");
+        }
+      };
+
+      source.start(0, lr[0]);
+      sourceRef.current = source;
+      startTimeRef.current = ctx.currentTime;
+      isPlayingRef.current = true;
+      rafRef.current = requestAnimationFrame(tick);
+      return;
+    }
+
     rafRef.current = requestAnimationFrame(tick);
-  }, []);
+  }, [stopSource, stopRaf]);
 
   const fetchAndDecode = useCallback(async (urlOrPath: string): Promise<AudioBuffer> => {
     if (bufferCache.has(urlOrPath)) {
       return bufferCache.get(urlOrPath)!;
     }
-
     const ctx = getCtx();
     const url = toFetchUrl(urlOrPath);
     const response = await fetch(url);
@@ -116,7 +152,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     stopSource();
     stopRaf();
     isPlayingRef.current = false;
-    bufferRef.current = null; // 开始加载时清空旧 buffer，防止快捷键误播上一首
+    bufferRef.current = null;
     offsetRef.current = 0;
     setCurrentTime(0);
     setDuration(0);
@@ -125,7 +161,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 
     try {
       const audioBuffer = await fetchAndDecode(urlOrPath);
-      if (loadId !== currentLoadId.current) return; // 如果发起了新加载，丢弃旧的响应
+      if (loadId !== currentLoadId.current) return;
 
       bufferRef.current = audioBuffer;
       durationRef.current = audioBuffer.duration;
@@ -141,13 +177,12 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const play = useCallback((fromSec?: number) => {
     const ctx = getCtx();
     const buffer = bufferRef.current;
-    if (!buffer) return; // loading 时 buffer 为 null，直接拦截非法触发
+    if (!buffer) return;
 
     if (fromSec !== undefined) {
       offsetRef.current = Math.max(0, Math.min(fromSec, buffer.duration));
     }
 
-    // 同步触发 resume，不阻塞后续 start 的调度
     if (ctx.state === "suspended") {
       ctx.resume().catch(console.warn);
     }
@@ -159,15 +194,16 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     source.connect(ctx.destination);
 
     source.onended = () => {
-      stopRaf();
-      setCurrentTime(buffer.duration);
-      offsetRef.current = 0;
-      isPlayingRef.current = false;
-      setPlayState("ready");
+      if (!loopRangeRef.current) {
+        stopRaf();
+        setCurrentTime(buffer.duration);
+        offsetRef.current = 0;
+        isPlayingRef.current = false;
+        setPlayState("ready");
+      }
     };
 
     source.start(0, offsetRef.current);
-
     sourceRef.current = source;
     startTimeRef.current = ctx.currentTime;
     isPlayingRef.current = true;
@@ -180,7 +216,6 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     if (!isPlayingRef.current) return;
     const ctx = getGlobalCtx();
 
-    // 同 tick：减掉输出延迟，记录的是用户耳朵实际听到的位置
     const rawLatency = ctx.outputLatency;
     const latency = Number.isFinite(rawLatency) ? rawLatency : 0;
     const elapsed = ctx.currentTime - startTimeRef.current - latency;
@@ -218,17 +253,17 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     bufferRef.current = null;
     offsetRef.current = 0;
     durationRef.current = 0;
+    loopRangeRef.current = null;
     setCurrentTime(0);
     setDuration(0);
+    setLoopRange(null);
     setPlayState("idle");
   }, [stopSource, stopRaf]);
 
-  // 组件卸载时清理
   useEffect(() => {
     return () => {
       stopSource();
       stopRaf();
-      // 不再调用 close() 销毁 Context，交由全局单例管理
     };
   }, [stopSource, stopRaf]);
 
@@ -236,6 +271,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     playState,
     currentTime,
     duration,
+    loopRange,
     load,
     prefetch,
     play,
@@ -243,5 +279,6 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     seek,
     toggle,
     unload,
+    setLoop,
   };
 }

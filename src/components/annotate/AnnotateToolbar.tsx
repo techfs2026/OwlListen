@@ -9,6 +9,7 @@ interface AnnotateToolbarProps {
   labelCount: number;
   currentTime: number;
   playing: boolean;
+  looping: boolean;
   onBack: () => void;
   onOpenAudio: () => void;
   onSaveLabels: () => void;
@@ -17,6 +18,7 @@ interface AnnotateToolbarProps {
   onPlay: () => void;
   onPause: () => void;
   onExport: () => void;
+  onToggleLoop: () => void;
 }
 
 function formatTime(sec: number): string {
@@ -26,17 +28,18 @@ function formatTime(sec: number): string {
   return `${m}:${s < 10 ? "0" : ""}${s.toFixed(3)}`;
 }
 
-// 工具栏专用按钮，比通用 Btn 稍大，有明确的视觉层次
 function TbBtn({
   children,
   onClick,
   disabled,
   variant = "default",
+  active,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
-  variant?: "default" | "primary" | "dark" | "outlined";
+  variant?: "default" | "primary" | "dark" | "outlined" | "loop";
+  active?: boolean;
 }) {
   const base: React.CSSProperties = {
     fontFamily: FONT.sans,
@@ -55,8 +58,11 @@ function TbBtn({
     default:  { background: C.paper2, color: C.ink2, border: `1px solid ${C.border2}` },
     primary:  { background: C.blue,   color: "#fff" },
     dark:     { background: C.ink,    color: "#fff" },
-    // outlined 用于「载入标记」「保存标记」——有明确边框，不会和禁用态混淆
     outlined: { background: C.paper,  color: C.ink,  border: `1px solid ${C.border2}`, fontWeight: 400 },
+    // 回环按钮：激活时绿底白字
+    loop: active
+      ? { background: "#16A34A", color: "#fff", border: "none" }
+      : { background: C.paper, color: C.ink2, border: `1px solid ${C.border2}` },
   };
   return (
     <button style={{ ...base, ...variants[variant] }} onClick={onClick} disabled={disabled}>
@@ -71,6 +77,7 @@ export function AnnotateToolbar({
   labelCount,
   currentTime,
   playing,
+  looping,
   onBack,
   onOpenAudio,
   onSaveLabels,
@@ -79,6 +86,7 @@ export function AnnotateToolbar({
   onPlay,
   onPause,
   onExport,
+  onToggleLoop,
 }: AnnotateToolbarProps) {
   const isReady = loadingState === "ready";
 
@@ -94,7 +102,6 @@ export function AnnotateToolbar({
 
       {/* 文件操作 */}
       <TbBtn variant="primary" onClick={onOpenAudio}>打开音频</TbBtn>
-      {/* outlined 变体让这两个按钮始终有清晰边框，不会误以为是禁用 */}
       <TbBtn variant="outlined" onClick={onLoadLabels} disabled={!isReady}>载入标记</TbBtn>
       <TbBtn variant="outlined" onClick={onSaveLabels} disabled={labelCount === 0}>保存标记</TbBtn>
       <TbBtn variant="outlined" onClick={onClearLabels} disabled={labelCount === 0}>清空</TbBtn>
@@ -108,6 +115,18 @@ export function AnnotateToolbar({
         onClick={playing ? onPause : onPlay}
       />
       <kbd style={s.kbd}>P</kbd>
+
+      {/* 回环播放按钮 */}
+      <TbBtn
+        variant="loop"
+        active={looping}
+        disabled={!isReady || labelCount === 0}
+        onClick={onToggleLoop}
+      >
+        ↺ 回环
+      </TbBtn>
+      <kbd style={s.kbd}>L</kbd>
+
       <span style={s.time}>
         {formatTime(currentTime)}
         <span style={s.timeSep}>/</span>
@@ -139,9 +158,16 @@ export function AnnotateToolbar({
 
       <div style={{ flex: 1 }} />
 
-      {/* 提示 */}
+      {/* 快捷键提示 */}
       <span style={s.hint}>
-        <HintIcon /> 滚轮缩放 · Meta+滚轮平移
+        <HintIcon />
+        <span>滚轮缩放 · Meta+滚轮平移</span>
+        <TbSep />
+        <span style={s.shortcutGroup}>
+          <kbd style={s.kbdSm}>[</kbd><span>入</span>
+          <kbd style={s.kbdSm}>]</kbd><span>出</span>
+          <kbd style={s.kbdSm}>N</kbd><span>静音</span>
+        </span>
       </span>
       <TbSep />
 
@@ -194,6 +220,16 @@ const s: Record<string, React.CSSProperties> = {
     padding: "1px 5px",
     lineHeight: 1.2,
   },
+  kbdSm: {
+    fontFamily: FONT.mono,
+    fontSize: 9,
+    color: C.ink3,
+    background: C.paper2,
+    border: `0.5px solid ${C.border2}`,
+    borderRadius: 3,
+    padding: "1px 4px",
+    lineHeight: 1.2,
+  },
   time: {
     fontFamily: FONT.mono,
     fontSize: 14,
@@ -224,8 +260,15 @@ const s: Record<string, React.CSSProperties> = {
   },
   error: { fontSize: 13, color: C.red, fontWeight: 500 },
   hint: {
-    display: "flex", alignItems: "center", gap: 4,
+    display: "flex", alignItems: "center", gap: 5,
     fontSize: 12, color: C.ink3,
     fontFamily: FONT.mono,
+  },
+  shortcutGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 11,
+    color: C.ink3,
   },
 };

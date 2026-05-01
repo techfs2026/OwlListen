@@ -5,12 +5,14 @@ import type { Label } from "@/types/waveform";
 interface LabelListProps {
   labels: Label[];
   duration: number;
+  selectedId: string | null;
+  onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onJumpTo: (start: number, end: number) => void;
   onUpdateText: (id: string, text: string) => void;
 }
 
-export function LabelList({ labels, onRemove, onJumpTo, onUpdateText }: LabelListProps) {
+export function LabelList({ labels, selectedId, onSelect, onRemove, onJumpTo, onUpdateText }: LabelListProps) {
   return (
     <div style={s.container}>
       {labels.length === 0 ? (
@@ -25,12 +27,13 @@ export function LabelList({ labels, onRemove, onJumpTo, onUpdateText }: LabelLis
               key={label.id}
               label={label}
               index={idx + 1}
+              selected={label.id === selectedId}
+              onSelect={() => onSelect(label.id)}
               onRemove={() => onRemove(label.id)}
               onJumpTo={() => onJumpTo(label.start, label.end)}
               onUpdateText={(text) => onUpdateText(label.id, text)}
             />
           ))}
-          {/* 末尾提示占位 */}
           <div style={s.addHint}>
             <div style={s.addIcon}>+</div>
             <div style={s.addText}>拖拽添加<br />片段</div>
@@ -46,6 +49,8 @@ export function LabelList({ labels, onRemove, onJumpTo, onUpdateText }: LabelLis
 interface LabelCardProps {
   label: Label;
   index: number;
+  selected: boolean;
+  onSelect: () => void;
   onRemove: () => void;
   onJumpTo: () => void;
   onUpdateText: (text: string) => void;
@@ -61,25 +66,52 @@ function fmtDur(sec: number): string {
   return sec < 1 ? `${(sec * 1000).toFixed(0)}ms` : `${sec.toFixed(2)}s`;
 }
 
-function LabelCard({ label, index, onRemove, onJumpTo, onUpdateText }: LabelCardProps) {
+function LabelCard({ label, index, selected, onSelect, onRemove, onJumpTo, onUpdateText }: LabelCardProps) {
+  const cardStyle: React.CSSProperties = {
+    ...s.card,
+    borderColor: selected ? C.blue : undefined,
+    boxShadow: selected
+      ? `0 0 0 2px ${C.blueLt}, 0 1px 3px rgba(26,39,68,0.08)`
+      : "0 1px 3px rgba(26,39,68,0.05)",
+    background: selected ? C.blueLt : C.paper,
+  };
+
   return (
-    <div style={s.card}>
-      <div style={s.cardNum}>#{index}</div>
+    <div style={cardStyle} onClick={onSelect}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ ...s.cardNum, color: selected ? C.blue : C.ink3 }}>#{index}</div>
+        {selected && (
+          <div style={s.selectedBadge}>
+            <span style={s.selectedDot} />
+            选中
+          </div>
+        )}
+      </div>
       <div style={s.cardTimes}>
         <span style={s.t}>{fmtTime(label.start)}</span>
         <span style={s.arrow}>→</span>
         <span style={s.t}>{fmtTime(label.end)}</span>
         <span style={s.dur}>{fmtDur(label.end - label.start)}</span>
       </div>
+      {selected && (
+        <div style={s.nudgeHint}>
+          <kbd style={s.kbdTiny}>←</kbd><span>调起点</span>
+          <span style={s.nudgeSep}>·</span>
+          <kbd style={s.kbdTiny}>→</kbd><span>调终点</span>
+          <span style={s.nudgeSep}>·</span>
+          <kbd style={s.kbdTiny}>↑↓</kbd><span>切换</span>
+        </div>
+      )}
       <input
         style={s.cardInput}
         value={label.text}
         placeholder="备注"
+        onClick={(e) => e.stopPropagation()} // 不触发 card onSelect
         onChange={(e) => onUpdateText(e.target.value)}
       />
       <div style={s.cardActions}>
-        <button style={s.actionBtn} onClick={onJumpTo}>定位</button>
-        <button style={{ ...s.actionBtn, ...s.dangerBtn }} onClick={onRemove}>删除</button>
+        <button style={s.actionBtn} onClick={(e) => { e.stopPropagation(); onJumpTo(); }}>定位</button>
+        <button style={{ ...s.actionBtn, ...s.dangerBtn }} onClick={(e) => { e.stopPropagation(); onRemove(); }}>删除</button>
       </div>
     </div>
   );
@@ -132,20 +164,59 @@ const s: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     alignSelf: "stretch",
     minWidth: 270,
-    background: C.paper,
     border: `0.5px solid ${C.border2}`,
     borderRadius: 10,
     padding: "12px 14px",
     display: "flex",
     flexDirection: "column",
     gap: 7,
-    boxShadow: "0 1px 3px rgba(26,39,68,0.05)",
+    cursor: "pointer",
+    transition: "box-shadow 0.12s, border-color 0.12s, background 0.12s",
   },
   cardNum: {
     fontFamily: FONT.mono,
     fontSize: 22,
     fontWeight: 500,
+  },
+  selectedBadge: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 10,
+    fontFamily: FONT.mono,
     color: C.blue,
+    background: "#DBEAFE",
+    border: `0.5px solid ${C.blueMid}55`,
+    borderRadius: 8,
+    padding: "2px 7px",
+    letterSpacing: "0.04em",
+  },
+  selectedDot: {
+    width: 5,
+    height: 5,
+    borderRadius: "50%",
+    background: C.blue,
+    display: "inline-block",
+  },
+  nudgeHint: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 10,
+    color: C.ink3,
+    fontFamily: FONT.mono,
+    marginTop: -2,
+  },
+  nudgeSep: { color: C.border2, fontSize: 10 },
+  kbdTiny: {
+    fontFamily: FONT.mono,
+    fontSize: 9,
+    color: C.ink3,
+    background: C.paper,
+    border: `0.5px solid ${C.border2}`,
+    borderRadius: 3,
+    padding: "1px 4px",
+    lineHeight: 1.2,
   },
   cardTimes: {
     display: "flex",

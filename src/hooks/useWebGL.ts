@@ -28,12 +28,22 @@ void main() {
 
 // ── 渲染参数 ─────────────────────────────────────────────────────────────────
 
+export interface SilenceRegion {
+  /** 归一化坐标 0~1，相对于整首音频 */
+  startRatio: number;
+  endRatio: number;
+}
+
 export interface RenderParams {
   data: RenderData | null;
-  playhead: number;                              // 0~1,-1 表示不显示
-  dragRange: [number, number] | null;            // 拖拽中的选区(归一化坐标)
-  labels: Array<{ start: number; end: number }>; // 已保存标记(归一化)
+  playhead: number;
+  dragRange: [number, number] | null;
+  labels: Array<{ start: number; end: number; selected?: boolean }>;
   colors: WaveformColors;
+  /** 静音区间（归一化，相对于当前 viewRange） */
+  silenceRegions?: SilenceRegion[];
+  /** 正在回环的区间（归一化，相对于当前 viewRange），高亮显示 */
+  loopRange?: [number, number] | null;
 }
 
 interface UseWebGLReturn {
@@ -89,9 +99,8 @@ export function useWebGL(): UseWebGLReturn {
     if (!res || !canvas) return;
 
     const { gl, program, vao, vbo } = res;
-    const { data, playhead, dragRange, labels, colors } = params;
+    const { data, playhead, dragRange, labels, colors, silenceRegions, loopRange } = params;
 
-    // 处理 DPR / 画布尺寸
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth * dpr;
     const h = canvas.clientHeight * dpr;
@@ -114,30 +123,39 @@ export function useWebGL(): UseWebGLReturn {
     const uColor = gl.getUniformLocation(program, "uColor");
     const uPointSize = gl.getUniformLocation(program, "uPointSize");
     gl.uniformMatrix4fv(uMatrix, false, orthoMatrix(w, h));
-    gl.uniform1f(uPointSize, 1.0); // 默认,Stem 模式会改
+    gl.uniform1f(uPointSize, 1.0);
 
-    // ── 1. 标签底色 / 拖拽选区(全画布高度,跨声道)──────────────────────────
+    // ── 0. 静音条带（最底层，波形之下）────────────────────────────────────
+    if (silenceRegions && silenceRegions.length > 0) {
+      drawSilenceBands(gl, vbo, uColor, w, h, silenceRegions);
+    }
+
+    // ── 0b. 回环高亮区间 ───────────────────────────────────────────────────
+    if (loopRange) {
+      const [ls, le] = loopRange;
+      const lx = ls * w;
+      const rx = le * w;
+      // 淡黄绿色背景，区别于 label 的蓝色和 selection 的黄色
+      gl.uniform4f(uColor, 0.18, 0.80, 0.44, 0.12);
+      uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
+      // 两侧竖线
+      gl.uniform4f(uColor, 0.18, 0.80, 0.44, 0.70);
+      uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
+    }
+
+    // ── 1. 标签底色 / 拖拽选区 ───────────────────────────────────────────
     drawLabelsAndSelection(gl, vbo, uColor, w, h, labels, dragRange, colors);
 
-    // ── 2. 波形(按声道布局)─────────────────────────────────────────────
+    // ── 2. 波形 ───────────────────────────────────────────────────────────
     if (data && data.channels.length > 0) {
       const channelCount = data.channels.length;
-      // 立体声:上下分屏;单声道:占满
-      // 每个声道的可用高度,留 8% 做顶/底边距,2 声道间还要让出中线
       const laneH = h / channelCount;
-      const laneAmpScale = laneH * 0.42; // 每个声道振幅缩放
-      // 各声道中心 Y
+      const laneAmpScale = laneH * 0.42;
       for (let i = 0; i < channelCount; i++) {
         const midY = laneH * (i + 0.5);
-        drawChannel(
-          gl, vbo, uColor, uPointSize,
-          data.channels[i],
-          0, w, midY, laneAmpScale,
-          colors,
-        );
+        drawChannel(gl, vbo, uColor, uPointSize, data.channels[i], 0, w, midY, laneAmpScale, colors);
       }
 
-      // 立体声中间分隔线
       if (channelCount === 2) {
         const dc = hexToVec4(colors.channelDivider ?? "#D1D5DB");
         gl.uniform4f(uColor, dc[0], dc[1], dc[2], 0.6);
@@ -160,6 +178,32 @@ export function useWebGL(): UseWebGLReturn {
   return { canvasRef, render };
 }
 
+// ── 静音条带 ──────────────────────────────────────────────────────────────────
+
+function drawSilenceBands(
+  gl: WebGL2RenderingContext,
+  vbo: WebGLBuffer,
+  uColor: WebGLUniformLocation | null,
+  w: number,
+  h: number,
+  regions: SilenceRegion[],
+) {
+  // 淡灰色半透明，不干扰波形阅读
+  for (const r of regions) {
+    const lx = r.startRatio * w;
+    const rx = r.endRatio * w;
+    if (rx - lx < 0.5) continue; // 太窄的不画，避免噪点
+
+    // 填充：柔和的灰色
+    gl.uniform4f(uColor, 0.55, 0.58, 0.63, 0.18);
+    uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
+
+    // 两侧虚边（用短线段模拟虚线感，只画两条实线但颜色很淡）
+    gl.uniform4f(uColor, 0.55, 0.58, 0.63, 0.35);
+    uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
+  }
+}
+
 // ── 标签 / 拖拽选区 ──────────────────────────────────────────────────────────
 
 function drawLabelsAndSelection(
@@ -168,32 +212,36 @@ function drawLabelsAndSelection(
   uColor: WebGLUniformLocation | null,
   w: number,
   h: number,
-  labels: Array<{ start: number; end: number }>,
+  labels: Array<{ start: number; end: number; selected?: boolean }>,
   dragRange: [number, number] | null,
   colors: WaveformColors,
 ) {
-  // 注意:中心线由每个声道在 drawChannel 里自行绘制(midY 因声道数变化)
-  // 这里不再画全画布的中心线
-
-  // 已保存标签
   if (labels.length > 0) {
     const fill = hexToVec4(colors.labelFill);
     const border = hexToVec4(colors.labelBorder);
     for (const lbl of labels) {
       const lx = lbl.start * w;
       const rx = lbl.end * w;
-      gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.4);
-      uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
-      gl.uniform4f(uColor, border[0], border[1], border[2], 0.7);
-      uploadAndDraw(
-        gl, vbo,
-        new Float32Array([lx, 0, lx, h, rx, 0, rx, h]),
-        gl.LINES,
-      );
+      if (lbl.selected) {
+        // 选中：更深填充 + 不透明粗边（左右各两条紧邻线模拟 2px）
+        gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.65);
+        uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
+        gl.uniform4f(uColor, border[0], border[1], border[2], 1.0);
+        uploadAndDraw(gl, vbo, new Float32Array([
+          lx,     0, lx,     h,
+          lx + 1, 0, lx + 1, h,
+          rx - 1, 0, rx - 1, h,
+          rx,     0, rx,     h,
+        ]), gl.LINES);
+      } else {
+        gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.4);
+        uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
+        gl.uniform4f(uColor, border[0], border[1], border[2], 0.7);
+        uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
+      }
     }
   }
 
-  // 拖拽选区
   if (dragRange) {
     const [ds, de] = dragRange;
     const lx = ds * w;
@@ -202,15 +250,11 @@ function drawLabelsAndSelection(
     gl.uniform4f(uColor, sc[0], sc[1], sc[2], 0.3);
     uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
     gl.uniform4f(uColor, sc[0], sc[1], sc[2], 0.7);
-    uploadAndDraw(
-      gl, vbo,
-      new Float32Array([lx, 0, lx, h, rx, 0, rx, h]),
-      gl.LINES,
-    );
+    uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
   }
 }
 
-// ── 单声道波形渲染(三模式分发)───────────────────────────────────────────
+// ── 单声道波形渲染 ────────────────────────────────────────────────────────────
 
 function drawChannel(
   gl: WebGL2RenderingContext,
@@ -222,7 +266,6 @@ function drawChannel(
   midY: number, ampScale: number,
   colors: WaveformColors,
 ) {
-  // 该声道的中心参考线(每个声道独立一条,位于自己的 midY)
   const cc = hexToVec4(colors.centerLine ?? "#1F2937");
   gl.uniform4f(uColor, cc[0], cc[1], cc[2], 0.5);
   uploadAndDraw(gl, vbo, new Float32Array([xStart, midY, xEnd, midY]), gl.LINES);
@@ -243,8 +286,6 @@ function drawChannel(
   }
 }
 
-// ── Envelope 模式:min/max 包络 + RMS 双层 ─────────────────────────────────
-
 function drawEnvelope(
   gl: WebGL2RenderingContext,
   vbo: WebGLBuffer,
@@ -258,7 +299,6 @@ function drawEnvelope(
   if (n === 0) return;
   const xRange = xEnd - xStart;
 
-  // min/max 包络顶点(每个 pixel 两个顶点:上 max,下 min,组成 TRIANGLE_STRIP)
   const envVerts = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) {
     const x = xStart + (i / Math.max(1, n - 1)) * xRange;
@@ -268,13 +308,10 @@ function drawEnvelope(
     envVerts[i * 4 + 2] = x;
     envVerts[i * 4 + 3] = midY - p.min * ampScale;
   }
-  // 包络层:min/max 实心填充(Audacity 风格,不透明)
   const wc = hexToVec4(colors.wave);
   gl.uniform4f(uColor, wc[0], wc[1], wc[2], 1.0);
   uploadAndDraw(gl, vbo, envVerts, gl.TRIANGLE_STRIP);
 
-  // RMS 内层:实心填充,深色,完全覆盖在包络内部
-  // Audacity 现代风格不画包络轮廓线——靠包络色和 RMS 色的对比就够了
   const rmsVerts = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) {
     const x = xStart + (i / Math.max(1, n - 1)) * xRange;
@@ -289,8 +326,6 @@ function drawEnvelope(
   uploadAndDraw(gl, vbo, rmsVerts, gl.TRIANGLE_STRIP);
 }
 
-// ── Polyline / Stem 模式:从原始样本画折线 ──────────────────────────────────
-
 function drawPolyline(
   gl: WebGL2RenderingContext,
   vbo: WebGLBuffer,
@@ -304,12 +339,9 @@ function drawPolyline(
   const n = points.length;
   if (n === 0) return;
 
-  // Rust 端给的 x 是相对 pixel(基于 pixelWidth 已做 DPR 放大),y 是样本值 [-1, 1]
-  // 这里 xStart/xEnd 是 DPR 后的物理像素
-  // 两者使用同一个 pixelWidth 基准,所以 Rust 给的 x 就是物理像素坐标(已经是 0~w)
   const verts = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) {
-    verts[i * 2]     = points[i][0];                    // 已经是 0~pixelWidth 的物理像素
+    verts[i * 2]     = points[i][0];
     verts[i * 2 + 1] = midY - points[i][1] * ampScale;
   }
 
@@ -317,7 +349,6 @@ function drawPolyline(
   gl.uniform4f(uColor, rc[0], rc[1], rc[2], 0.95);
   uploadAndDraw(gl, vbo, verts, gl.LINE_STRIP);
 
-  // 抑制 unused 警告
   void xStart; void xEnd; void _isStem;
 }
 
