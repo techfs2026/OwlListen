@@ -223,10 +223,11 @@ function drawLabelsAndSelection(
       const lx = lbl.start * w;
       const rx = lbl.end * w;
       if (lbl.selected) {
-        // 选中：更深填充 + 不透明粗边（左右各两条紧邻线模拟 2px）
+        // 选中：更深填充 + 橙色粗边框（左右各两条紧邻线模拟 2px）
         gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.65);
         uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
-        gl.uniform4f(uColor, border[0], border[1], border[2], 1.0);
+        // 橙色 #F97316
+        gl.uniform4f(uColor, 0.976, 0.451, 0.086, 1.0);
         uploadAndDraw(gl, vbo, new Float32Array([
           lx,     0, lx,     h,
           lx + 1, 0, lx + 1, h,

@@ -9,7 +9,7 @@ import { ExportPanel, type ExportProgress } from "./ExportPanel";
 import { useWaveform } from "@/hooks/useWaveform";
 import { useLabels } from "@/hooks/useLabels";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
-import { splitAudio, transcribeSegments, buildZip, getTempDir } from "@/utils/tauriApi";
+import { splitAudio, transcribeSegments, buildZip, getTempDir, getPeaks } from "@/utils/tauriApi";
 import type { RenderData } from "@/types/waveform";
 import type { SilenceRegion } from "@/hooks/useWebGL";
 
@@ -19,73 +19,41 @@ interface AnnotateScreenProps {
 
 // ── 静音检测 ──────────────────────────────────────────────────────────────────
 
+const SILENCE_RATIO = 0.15;      // 低于中位数 RMS × 15% 视为静音
+const MIN_SILENCE_SEC = 0.1;     // 静音区间最短 100ms，过滤噪点
+
 /**
- * 从 RenderData（Envelope 模式）中计算静音区间。
- *
- * 算法：
- * 1. 收集所有 pixel 的 RMS 值
- * 2. 取中位数 × SILENCE_RATIO 作为阈值（相对阈值，自适应录音电平）
- * 3. 连续低于阈值的 pixel 合并为一个区间
- * 4. 过滤掉过短区间（< MIN_SILENCE_RATIO 的视图宽度），避免噪点
- *
- * 返回归一化坐标（0~1，相对于当前 viewRange），直接传给 WebGL 渲染。
+ * 从全曲 Envelope peaks（已映射到绝对时间）计算静音区间列表（秒）。
+ * 输入 peaks 对应 [0, duration]，n 个点均匀分布。
  */
-const SILENCE_RATIO = 0.15;       // 低于中位数 × 15% 视为静音
-const MIN_SILENCE_RATIO = 0.005;  // 静音区间最小占视图宽度的 0.5%
-
-function computeSilenceRegions(data: RenderData): SilenceRegion[] {
-  // 只在 Envelope 模式下有 RMS 数据
-  if (data.mode !== "envelope" || data.channels.length === 0) return [];
-
-  const ch = data.channels[0];
-  if (ch.kind !== "envelope" || ch.peaks.length === 0) return [];
-
-  const peaks = ch.peaks;
+function computeAbsSilenceRegions(
+  peaks: Array<{ rms: number }>,
+  duration: number,
+): Array<{ start: number; end: number }> {
   const n = peaks.length;
+  if (n === 0) return [];
 
-  // 1. 计算中位数（对拷贝排序，不破坏原数据）
   const rmsSorted = peaks.map((p) => p.rms).sort((a, b) => a - b);
   const median = rmsSorted[Math.floor(n / 2)];
   const threshold = median * SILENCE_RATIO;
 
-  // 2. 扫描静音 pixel，合并连续区间
-  const regions: SilenceRegion[] = [];
+  const regions: Array<{ start: number; end: number }> = [];
   let silStart = -1;
 
   for (let i = 0; i <= n; i++) {
     const isSilent = i < n && peaks[i].rms <= threshold;
-
     if (isSilent && silStart === -1) {
       silStart = i;
     } else if (!isSilent && silStart !== -1) {
-      const startRatio = silStart / n;
-      const endRatio = i / n;
-      if (endRatio - startRatio >= MIN_SILENCE_RATIO) {
-        regions.push({ startRatio, endRatio });
+      const start = (silStart / n) * duration;
+      const end   = (i / n) * duration;
+      if (end - start >= MIN_SILENCE_SEC) {
+        regions.push({ start, end });
       }
       silStart = -1;
     }
   }
-
   return regions;
-}
-
-// ── 全局静音区间（秒），用于"跳转到下个静音"─────────────────────────────────
-
-/**
- * 将视图归一化的静音区间转换为绝对秒数。
- * 因为 silenceRegions 是相对于当前 viewRange 的，需要还原到绝对时间轴。
- */
-function toAbsSilenceRegions(
-  regions: SilenceRegion[],
-  viewStart: number,
-  viewEnd: number,
-): Array<{ start: number; end: number }> {
-  const dur = viewEnd - viewStart;
-  return regions.map((r) => ({
-    start: viewStart + r.startRatio * dur,
-    end: viewStart + r.endRatio * dur,
-  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,22 +80,26 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // 全曲绝对时间静音区间，文件加载后一次性计算，与视图无关
+  const [absSilenceRegions, setAbsSilenceRegions] = useState<Array<{ start: number; end: number }>>([]);
 
   const audioPathRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // ── 静音区间（当前视图归一化）─────────────────────────────────────────────
-
+  // 当前视图的归一化静音条带（仅用于 WebGL 渲染）
+  // 从绝对时间区间换算，与 renderData.mode 无关——放大到 polyline/stem 也能显示
   const silenceRegions = useMemo<SilenceRegion[]>(() => {
-    if (!renderData) return [];
-    return computeSilenceRegions(renderData);
-  }, [renderData]);
-
-  // 绝对时间静音区间（用于键盘跳转）
-  const absSilenceRegions = useMemo(
-    () => toAbsSilenceRegions(silenceRegions, viewRange.startSec, viewRange.endSec),
-    [silenceRegions, viewRange]
-  );
+    if (absSilenceRegions.length === 0) return [];
+    const { startSec, endSec } = viewRange;
+    const viewDur = endSec - startSec;
+    if (viewDur <= 0) return [];
+    return absSilenceRegions
+      .filter((r) => r.end > startSec && r.start < endSec)
+      .map((r) => ({
+        startRatio: Math.max(0, (r.start - startSec) / viewDur),
+        endRatio:   Math.min(1, (r.end   - startSec) / viewDur),
+      }));
+  }, [absSilenceRegions, viewRange]);
 
   // ── 峰值刷新 ──────────────────────────────────────────────────────────────
 
@@ -215,8 +187,32 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     clearLabels();
     unloadAudio();
     setLoop(null);
+    setAbsSilenceRegions([]);
     await Promise.all([loadWaveform(path), loadAudio(path)]);
   }, [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop]);
+
+  // 全曲静音分析：loadingState 变为 ready 时触发一次
+  // 直接调 getPeaks(0, duration, 1200)，不经过 fetchPeaks（后者绑定当前 viewRange）
+  useEffect(() => {
+    if (loadingState !== "ready" || !audioInfo) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await getPeaks(0, audioInfo.duration, 1200);
+        if (cancelled || !data || data.mode !== "envelope") return;
+        const ch = data.channels[0];
+        if (ch?.kind !== "envelope") return;
+        const regions = computeAbsSilenceRegions(ch.peaks, audioInfo.duration);
+        setAbsSilenceRegions(regions);
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`[silence] ${regions.length} regions, duration=${audioInfo.duration.toFixed(1)}s`);
+        }
+      } catch (err) {
+        console.warn("[silence] analysis failed:", err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loadingState, audioInfo]);
 
   const handleSaveLabels = useCallback(async () => {
     const path = await save({
@@ -291,6 +287,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       clearLabels();
       unloadAudio();
       setLoop(null);
+      setAbsSilenceRegions([]);
       await Promise.all([loadWaveform(path), loadAudio(path)]);
     },
     [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop]
@@ -341,22 +338,16 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   // ── 键盘快捷键 ────────────────────────────────────────────────────────────
   //
-  // P            播放/暂停
-  // [            打 in 点
-  // ]            打 out 点
-  // L            切换回环播放
-  // N            跳转到下一个静音区
-  // ↑ / ↓        切换选中区段（并跳转视图）
-  // ← / →        微调选中区段起点/终点（步长 = 视图宽度 × 0.1%）
+  // P      播放/暂停
+  // L      切换回环播放
+  // N      跳转到下一个静音区
+  // ← / →  切换选中区段（保持缩放，平移视图）
   //
-  const inPointRef = useRef<number | null>(null);
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // 方向键允许 repeat（按住持续微调）
-      const isArrow = e.key === "ArrowLeft" || e.key === "ArrowRight" ||
-                      e.key === "ArrowUp"   || e.key === "ArrowDown";
-      if (e.repeat && !isArrow) return;
+      // ←→ 允许 repeat（按住连续切换）；其余不允许
+      const isLR = e.key === "ArrowLeft" || e.key === "ArrowRight";
+      if (e.repeat && !isLR) return;
 
       const el = document.activeElement as HTMLElement | null;
       const inEditable =
@@ -374,42 +365,16 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         return;
       }
 
-      // [ ：打 in 点
-      if (e.key === "[") {
-        if (loadingState !== "ready") return;
-        e.preventDefault();
-        inPointRef.current = currentTime;
-        console.log(`[punch] in @ ${currentTime.toFixed(3)}s`);
-        return;
-      }
-
-      // ] ：打 out 点，用 inPoint + currentTime 创建 label
-      if (e.key === "]") {
-        if (loadingState !== "ready") return;
-        e.preventDefault();
-        const inPt = inPointRef.current;
-        if (inPt === null) return;
-        const start = Math.min(inPt, currentTime);
-        const end = Math.max(inPt, currentTime);
-        if (end - start >= 0.05) {
-          addLabel(start, end);
-        }
-        inPointRef.current = null;
-        return;
-      }
-
-      // L：切换回环播放（针对最近一个 label，或清除回环）
+      // L：切换回环播放
       if (e.key === "l" || e.key === "L") {
         if (loadingState !== "ready") return;
         e.preventDefault();
 
         if (loopRange !== null) {
-          // 已经在回环，取消
           setLoop(null);
           return;
         }
 
-        // 找当前时间所在的 label，或者最近的 label
         const target =
           labels.find((lb) => currentTime >= lb.start && currentTime <= lb.end) ??
           labels.reduce<typeof labels[0] | null>((best, lb) => {
@@ -426,7 +391,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         return;
       }
 
-      // N：跳转到下一个静音区开始处
+      // N：跳转到下一个静音区
       if (e.key === "n" || e.key === "N") {
         if (loadingState !== "ready") return;
         e.preventDefault();
@@ -441,56 +406,29 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         return;
       }
 
-      // ↑ / ↓：切换选中区段
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      // ← / →：切换选中区段，保持当前缩放级别，平移视图使目标区段居中
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         if (loadingState !== "ready" || labels.length === 0) return;
         e.preventDefault();
 
         const curIdx = labels.findIndex((l) => l.id === selectedId);
         let nextIdx: number;
         if (curIdx === -1) {
-          // 没有选中时：↓ 选第一个，↑ 选最后一个
-          nextIdx = e.key === "ArrowDown" ? 0 : labels.length - 1;
+          nextIdx = e.key === "ArrowRight" ? 0 : labels.length - 1;
         } else {
-          nextIdx = e.key === "ArrowDown"
+          nextIdx = e.key === "ArrowRight"
             ? Math.min(curIdx + 1, labels.length - 1)
             : Math.max(curIdx - 1, 0);
         }
 
         const target = labels[nextIdx];
         setSelectedId(target.id);
-        // 跳转视图，让选中区段完整可见
-        const pad = (target.end - target.start) * 0.2;
-        setViewRange({
-          startSec: Math.max(0, target.start - pad),
-          endSec: target.end + pad,
-        });
-        seek(target.start);
-        return;
-      }
 
-      // ← / →：微调选中区段的起点（←）或终点（→）
-      // 步长 = 当前视图时长 × 0.1%，随缩放自动变化
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        if (loadingState !== "ready" || !selectedId) return;
-        e.preventDefault();
-
-        const label = labels.find((l) => l.id === selectedId);
-        if (!label) return;
-
+        // 保持当前视图时长，平移使 target.start 落在视图左侧 25% 处
         const viewDur = viewRange.endSec - viewRange.startSec;
-        const step = viewDur * 0.001; // 0.1% 视图宽度
-        const maxSec = audioInfo?.duration ?? Infinity;
-
-        if (e.key === "ArrowLeft") {
-          // 调起点向左（向前）
-          const newStart = Math.max(0, label.start - step);
-          updateLabel(selectedId, { start: Math.min(newStart, label.end - 0.01) });
-        } else {
-          // 调终点向右（向后）
-          const newEnd = Math.min(maxSec, label.end + step);
-          updateLabel(selectedId, { end: Math.max(newEnd, label.start + 0.01) });
-        }
+        const newStart = Math.max(0, target.start - viewDur * 0.25);
+        setViewRange({ startSec: newStart, endSec: newStart + viewDur });
+        seek(target.start);
         return;
       }
     };
@@ -499,10 +437,10 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [
     playState, play, pause, loadingState,
-    currentTime, addLabel,
+    currentTime,
     loopRange, setLoop, labels, seek,
     absSilenceRegions, viewRange, setViewRange,
-    selectedId, updateLabel, audioInfo,
+    selectedId,
   ]);
 
   return (
@@ -571,13 +509,6 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
             onLabelEdgeDrag={handleLabelEdgeDrag}
           />
         )}
-
-        {/* in 点指示器：显示打了 in 点但还没打 out 点时 */}
-        <InPointIndicator
-          inPointSec={inPointRef.current}
-          viewRange={viewRange}
-          containerWidth={containerWidth}
-        />
       </div>
 
       {/* 时间轴 */}
@@ -624,56 +555,6 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 }
 
 // ── In 点指示器 ───────────────────────────────────────────────────────────────
-// 在打了 [ 但还没打 ] 时，在波形上显示一条橙色竖线
-
-function InPointIndicator({
-  inPointSec,
-  viewRange,
-  containerWidth,
-}: {
-  inPointSec: number | null;
-  viewRange: { startSec: number; endSec: number };
-  containerWidth: number;
-}) {
-  if (inPointSec === null || containerWidth === 0) return null;
-  const dur = viewRange.endSec - viewRange.startSec;
-  if (dur <= 0) return null;
-  const ratio = (inPointSec - viewRange.startSec) / dur;
-  if (ratio < 0 || ratio > 1) return null;
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: 0,
-        bottom: 0,
-        left: `${ratio * 100}%`,
-        width: 2,
-        background: "#F97316",
-        pointerEvents: "none",
-        zIndex: 10,
-      }}
-    >
-      {/* 顶部小旗 */}
-      <div style={{
-        position: "absolute",
-        top: 4,
-        left: 3,
-        background: "#F97316",
-        color: "#fff",
-        fontSize: 9,
-        fontWeight: 700,
-        padding: "1px 4px",
-        borderRadius: 3,
-        whiteSpace: "nowrap",
-        letterSpacing: "0.05em",
-      }}>
-        IN
-      </div>
-    </div>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 function EmptyState({ icon, title, hint, spinner }: {

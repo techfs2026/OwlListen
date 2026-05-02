@@ -29,11 +29,7 @@ function formatTime(sec: number): string {
 }
 
 function TbBtn({
-  children,
-  onClick,
-  disabled,
-  variant = "default",
-  active,
+  children, onClick, disabled, variant = "default", active,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
@@ -43,10 +39,10 @@ function TbBtn({
 }) {
   const base: React.CSSProperties = {
     fontFamily: FONT.sans,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 500,
-    borderRadius: 7,
-    padding: "7px 16px",
+    borderRadius: 6,
+    padding: "5px 13px",
     cursor: disabled ? "not-allowed" : "pointer",
     border: "none",
     whiteSpace: "nowrap" as const,
@@ -59,7 +55,6 @@ function TbBtn({
     primary:  { background: C.blue,   color: "#fff" },
     dark:     { background: C.ink,    color: "#fff" },
     outlined: { background: C.paper,  color: C.ink,  border: `1px solid ${C.border2}`, fontWeight: 400 },
-    // 回环按钮：激活时绿底白字
     loop: active
       ? { background: "#16A34A", color: "#fff", border: "none" }
       : { background: C.paper, color: C.ink2, border: `1px solid ${C.border2}` },
@@ -71,204 +66,192 @@ function TbBtn({
   );
 }
 
-export function AnnotateToolbar({
-  audioInfo,
-  loadingState,
-  labelCount,
-  currentTime,
-  playing,
-  looping,
-  onBack,
-  onOpenAudio,
-  onSaveLabels,
-  onLoadLabels,
-  onClearLabels,
-  onPlay,
-  onPause,
-  onExport,
-  onToggleLoop,
-}: AnnotateToolbarProps) {
-  const isReady = loadingState === "ready";
-
+function Kbd({ children, sm }: { children: React.ReactNode; sm?: boolean }) {
   return (
-    <div style={s.bar}>
-      {/* 返回 */}
-      <TbBtn onClick={onBack} variant="outlined" disabled={false}>← 返回</TbBtn>
-      <TbSep />
-
-      {/* 模式标识 */}
-      <span style={s.modeTag}>标注模式</span>
-      <TbSep />
-
-      {/* 文件操作 */}
-      <TbBtn variant="primary" onClick={onOpenAudio}>打开音频</TbBtn>
-      <TbBtn variant="outlined" onClick={onLoadLabels} disabled={!isReady}>载入标记</TbBtn>
-      <TbBtn variant="outlined" onClick={onSaveLabels} disabled={labelCount === 0}>保存标记</TbBtn>
-      <TbBtn variant="outlined" onClick={onClearLabels} disabled={labelCount === 0}>清空</TbBtn>
-      <TbSep />
-
-      {/* 播放控制 */}
-      <PlayBtn
-        playing={playing}
-        disabled={!isReady}
-        size={30}
-        onClick={playing ? onPause : onPlay}
-      />
-      <kbd style={s.kbd}>P</kbd>
-
-      {/* 回环播放按钮 */}
-      <TbBtn
-        variant="loop"
-        active={looping}
-        disabled={!isReady || labelCount === 0}
-        onClick={onToggleLoop}
-      >
-        ↺ 回环
-      </TbBtn>
-      <kbd style={s.kbd}>L</kbd>
-
-      <span style={s.time}>
-        {formatTime(currentTime)}
-        <span style={s.timeSep}>/</span>
-        {formatTime(audioInfo?.duration ?? 0)}
-      </span>
-
-      {/* 状态指示 */}
-      {loadingState === "decoding" && (
-        <>
-          <TbSep />
-          <span style={s.decoding}>
-            <span style={s.decodingDot} /> 解码中…
-          </span>
-        </>
-      )}
-      {loadingState === "error" && (
-        <>
-          <TbSep />
-          <span style={s.error}>加载失败</span>
-        </>
-      )}
-      {isReady && audioInfo && (
-        <>
-          <TbSep />
-          <span style={s.meta}>{audioInfo.levelCount} 层金字塔</span>
-          {labelCount > 0 && <span style={s.badge}>{labelCount} 段</span>}
-        </>
-      )}
-
-      <div style={{ flex: 1 }} />
-
-      {/* 快捷键提示 */}
-      <span style={s.hint}>
-        <HintIcon />
-        <span>滚轮缩放 · Meta+滚轮平移</span>
-        <TbSep />
-        <span style={s.shortcutGroup}>
-          <kbd style={s.kbdSm}>[</kbd><span>入</span>
-          <kbd style={s.kbdSm}>]</kbd><span>出</span>
-          <kbd style={s.kbdSm}>N</kbd><span>静音</span>
-        </span>
-      </span>
-      <TbSep />
-
-      {/* 导出 */}
-      <TbBtn variant="dark" onClick={onExport} disabled={labelCount === 0}>
-        ⬇ 导出数据包
-      </TbBtn>
-    </div>
+    <kbd style={{
+      fontFamily: FONT.mono,
+      fontSize: sm ? 9 : 10,
+      color: C.ink3,
+      background: C.paper2,
+      border: `0.5px solid ${C.border2}`,
+      borderRadius: 3,
+      padding: sm ? "1px 3px" : "1px 5px",
+      lineHeight: 1.2,
+    }}>
+      {children}
+    </kbd>
   );
 }
 
 function HintIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0, opacity: 0.5 }}>
       <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1"/>
       <path d="M7 4.5v3M7 9h0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
     </svg>
   );
 }
 
+export function AnnotateToolbar({
+  audioInfo, loadingState, labelCount, currentTime,
+  playing, looping,
+  onBack, onOpenAudio, onSaveLabels, onLoadLabels, onClearLabels,
+  onPlay, onPause, onExport, onToggleLoop,
+}: AnnotateToolbarProps) {
+  const isReady = loadingState === "ready";
+
+  return (
+    <div style={s.shell}>
+
+      {/* ── 行一：导航 · 播放 · 时间 · 状态 ── */}
+      <div style={s.row}>
+
+        <TbBtn onClick={onBack} variant="outlined">← 返回</TbBtn>
+        <span style={s.modeTag}>标注</span>
+        <div style={s.rowSep} />
+
+        <PlayBtn
+          playing={playing}
+          disabled={!isReady}
+          size={28}
+          onClick={playing ? onPause : onPlay}
+        />
+        <Kbd>P</Kbd>
+
+        <TbBtn
+          variant="loop"
+          active={looping}
+          disabled={!isReady || labelCount === 0}
+          onClick={onToggleLoop}
+        >
+          ↺ 回环
+        </TbBtn>
+        <Kbd>L</Kbd>
+
+        <div style={s.rowSep} />
+
+        <span style={s.time}>
+          {formatTime(currentTime)}
+          <span style={s.timeSep}>/</span>
+          {formatTime(audioInfo?.duration ?? 0)}
+        </span>
+
+        {loadingState === "decoding" && (
+          <span style={s.decoding}><span style={s.decodingDot} />解码中…</span>
+        )}
+        {loadingState === "error" && (
+          <span style={s.error}>加载失败</span>
+        )}
+        {isReady && audioInfo && (
+          <>
+            <span style={s.meta}>{audioInfo.levelCount} 层金字塔</span>
+            {labelCount > 0 && <span style={s.badge}>{labelCount} 段</span>}
+          </>
+        )}
+
+        <div style={{ flex: 1 }} />
+
+        <span style={s.hint}>
+          <HintIcon />
+          滚轮缩放 · Meta 平移
+          <span style={s.hintDot}>·</span>
+          <Kbd sm>←→</Kbd>切段
+          <Kbd sm>N</Kbd>跳静音
+        </span>
+      </div>
+
+      <div style={s.divider} />
+
+      {/* ── 行二：文件操作 · 导出 ── */}
+      <div style={s.row}>
+        <TbBtn variant="primary" onClick={onOpenAudio}>打开音频</TbBtn>
+        <div style={s.rowSep} />
+        <TbBtn variant="outlined" onClick={onLoadLabels}  disabled={!isReady}>载入标记</TbBtn>
+        <TbBtn variant="outlined" onClick={onSaveLabels}  disabled={labelCount === 0}>保存标记</TbBtn>
+        <TbBtn variant="outlined" onClick={onClearLabels} disabled={labelCount === 0}>清空标记</TbBtn>
+        <div style={{ flex: 1 }} />
+        <TbBtn variant="dark" onClick={onExport} disabled={labelCount === 0}>⬇ 导出数据包</TbBtn>
+      </div>
+
+    </div>
+  );
+}
+
+// ── 样式 ─────────────────────────────────────────────────────────────────────
+
 const s: Record<string, React.CSSProperties> = {
-  bar: {
+  shell: {
     display: "flex",
-    alignItems: "center",
-    gap: 7,
-    padding: "0 20px",
-    height: 60,
+    flexDirection: "column",
     background: C.paper,
     borderBottom: `0.5px solid ${C.border}`,
     flexShrink: 0,
     boxShadow: "0 1px 0 rgba(26,39,68,0.04)",
   },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "0 16px",
+    height: 44,
+  },
+  divider: {
+    height: "0.5px",
+    background: C.border,
+    margin: "0 16px",
+    opacity: 0.5,
+  },
+  rowSep: {
+    width: 1,
+    height: 18,
+    background: C.border2,
+    borderRadius: 1,
+    flexShrink: 0,
+    margin: "0 2px",
+  },
   modeTag: {
     fontFamily: FONT.mono,
-    fontSize: 11,
-    letterSpacing: "0.10em",
+    fontSize: 10,
+    letterSpacing: "0.12em",
     textTransform: "uppercase" as const,
     color: C.blue,
-    padding: "3px 9px",
+    padding: "2px 7px",
     background: C.blueLt,
     borderRadius: 4,
   },
-  kbd: {
-    fontFamily: FONT.mono,
-    fontSize: 10,
-    color: C.ink3,
-    background: C.paper2,
-    border: `0.5px solid ${C.border2}`,
-    borderRadius: 3,
-    padding: "1px 5px",
-    lineHeight: 1.2,
-  },
-  kbdSm: {
-    fontFamily: FONT.mono,
-    fontSize: 9,
-    color: C.ink3,
-    background: C.paper2,
-    border: `0.5px solid ${C.border2}`,
-    borderRadius: 3,
-    padding: "1px 4px",
-    lineHeight: 1.2,
-  },
   time: {
     fontFamily: FONT.mono,
-    fontSize: 14,
+    fontSize: 13,
     color: C.ink,
     letterSpacing: "-0.02em",
-    minWidth: 145,
+    minWidth: 138,
   },
-  timeSep: { color: C.ink3, margin: "0 4px" },
-  meta: { fontSize: 12, color: C.ink3 },
+  timeSep: { color: C.ink3, margin: "0 3px" },
+  meta: { fontSize: 11, color: C.ink3 },
   badge: {
     fontFamily: FONT.mono,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: 500,
     color: C.blue,
     background: C.blueLt,
     border: `0.5px solid ${C.blueMid}44`,
     borderRadius: 10,
-    padding: "2px 10px",
+    padding: "2px 8px",
   },
   decoding: {
-    display: "flex", alignItems: "center", gap: 5,
-    fontSize: 13, color: "#D97706", fontWeight: 500,
+    display: "flex", alignItems: "center", gap: 4,
+    fontSize: 12, color: "#D97706", fontWeight: 500,
   },
   decodingDot: {
-    width: 7, height: 7, borderRadius: "50%",
+    width: 6, height: 6, borderRadius: "50%",
     background: "#D97706",
     animation: "spin 1s linear infinite",
   },
-  error: { fontSize: 13, color: C.red, fontWeight: 500 },
+  error: { fontSize: 12, color: C.red, fontWeight: 500 },
   hint: {
-    display: "flex", alignItems: "center", gap: 5,
-    fontSize: 12, color: C.ink3,
+    display: "flex", alignItems: "center", gap: 4,
+    fontSize: 11, color: C.ink3,
     fontFamily: FONT.mono,
   },
-  shortcutGroup: {
-    display: "flex",
-    alignItems: "center",
-    gap: 4,
-    fontSize: 11,
-    color: C.ink3,
-  },
+  hintDot: { margin: "0 2px", color: C.border2 },
 };

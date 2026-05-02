@@ -95,11 +95,7 @@ function LabelCard({ label, index, selected, onSelect, onRemove, onJumpTo, onUpd
       </div>
       {selected && (
         <div style={s.nudgeHint}>
-          <kbd style={s.kbdTiny}>←</kbd><span>调起点</span>
-          <span style={s.nudgeSep}>·</span>
-          <kbd style={s.kbdTiny}>→</kbd><span>调终点</span>
-          <span style={s.nudgeSep}>·</span>
-          <kbd style={s.kbdTiny}>↑↓</kbd><span>切换</span>
+          <kbd style={s.kbdTiny}>←→</kbd><span>切换区段</span>
         </div>
       )}
       <input
