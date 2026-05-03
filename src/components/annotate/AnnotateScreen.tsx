@@ -62,7 +62,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   const {
     audioInfo, loadingState, viewRange,
     loadFile: loadWaveform, fetchPeaks, setViewRange,
-    zoomIn, zoomOut, zoomReset, scrollBy,
+    zoomIn, zoomOut, scrollBy,
   } = useWaveform();
 
   const {
@@ -71,7 +71,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   } = useLabels();
 
   const {
-    playState, currentTime, duration: playerDuration,
+    playState, currentTime,
     loopRange,
     load: loadAudio, play, pause, seek, unload: unloadAudio, setLoop,
   } = useAudioPlayer();

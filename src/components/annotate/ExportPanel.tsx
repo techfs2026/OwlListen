@@ -1,5 +1,4 @@
-import React from "react";
-import { C, FONT, SHADOW } from "@/styles";
+import { C, FONT } from "@/styles";
 import { Btn, Overlay, Card } from "@/components/shared/Primitives";
 
 export type ExportStep = "idle" | "splitting" | "transcribing" | "zipping" | "done" | "error";

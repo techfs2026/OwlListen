@@ -1,6 +1,6 @@
 import React from "react";
 import { C, FONT } from "@/styles";
-import { PlayBtn, TbSep } from "@/components/shared/Primitives";
+import { PlayBtn } from "@/components/shared/Primitives";
 import type { AudioInfo, LoadingState } from "@/types/waveform";
 
 interface AnnotateToolbarProps {
