@@ -73,11 +73,14 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
       switch (e.key) {
-        case " ":
-          e.preventDefault();
-          if (playState === "playing") pause();
-          else if (playState === "ready" || playState === "paused") play();
-          break;
+        case "p":
+        case "P":
+          {
+            e.preventDefault();
+            if (playState === "playing") pause();
+            else if (playState === "ready" || playState === "paused") play();
+            break;
+          }
         case "[":
           e.preventDefault();
           prevChapter();
@@ -645,7 +648,7 @@ const np: Record<string, React.CSSProperties> = {
     background: C.blueLt,
     padding: "2px 8px",
     borderRadius: 4,
-    alignSelf: "flex-start" as const,
+    alignSelf: "center",
   },
   chapterTitle: {
     fontSize: 15,
@@ -654,6 +657,7 @@ const np: Record<string, React.CSSProperties> = {
     lineHeight: 1.5,
     // 允许换行，不截断
     wordBreak: "break-word" as const,
+    alignSelf: "center",
   },
 };
 
