@@ -18,11 +18,15 @@ pub fn run() {
             commands::get_temp_dir,
             commands::split_audio,
             commands::transcribe_segments,
+            commands::transcribe_recording,
             commands::build_zip,
             commands::reveal_in_finder,
             commands::load_audiobook,
             commands::get_audiobook_progress,
             commands::save_audiobook_progress,
+            commands::get_recent_audiobooks,
+            commands::push_recent_audiobook,
+            commands::get_audiobook_cover,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

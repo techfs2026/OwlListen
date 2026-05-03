@@ -5,6 +5,7 @@ import { Btn, MiniPlayer } from "@/components/shared/Primitives";
 import { DiffView } from "./DiffView";
 import { computeDiff } from "@/hooks/useDiff";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useSpeechInput } from "@/hooks/useSpeechInput";
 import type { ListenSegment, SegmentState, SegmentStatus } from "@/types/waveform";
 
 interface PracticePanelProps {
@@ -30,6 +31,9 @@ interface PracticePanelProps {
 // L          下一段
 // D          标记完成并跳下一段
 // F          标记重听
+// V          开始 / 停止语音识别
+
+// ── 主组件 ────────────────────────────────────────────────────────────────────
 
 export function PracticePanel({
   segment,
@@ -48,9 +52,13 @@ export function PracticePanel({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
+  // 语音识别：已确认文字的"基座"（不含临时 interim）
+  const confirmedTextRef = useRef(segState.userText);
+  // 当前展示的 interim 预览文字
+  const [interimPreview, setInterimPreview] = useState("");
+
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  // ref 版本，供不依赖 re-render 的回调（onFocusChanged、resize 事件）读取
   const textareaFocusedRef = useRef(false);
 
   const {
@@ -59,6 +67,61 @@ export function PracticePanel({
   } = useAudioPlayer();
 
   const playing = playState === "playing";
+
+  // ── 语音回调 ──────────────────────────────────────────────────────────────
+
+  const handleTranscript = useCallback((text: string, isFinal: boolean) => {
+    if (isFinal) {
+      // 把最终识别结果拼接到已有内容后
+      const base = confirmedTextRef.current;
+      const joined = base
+        ? (base.endsWith(" ") || base.endsWith("\n") ? base + text : base + " " + text)
+        : text;
+      confirmedTextRef.current = joined;
+      setInterimPreview("");
+      onUpdateText(joined);
+    } else {
+      // 仅更新预览，不写入持久化
+      setInterimPreview(text);
+    }
+  }, [onUpdateText]);
+
+  const { speechState, toggleListening, stopListening } = useSpeechInput(
+    handleTranscript,
+    { model: "base" },
+  );
+
+  const isListening = speechState === "listening";
+  const isTranscribing = speechState === "transcribing";
+  const speechUnsupported = speechState === "unsupported";
+
+  // 语音停止时清除预览
+  useEffect(() => {
+    if (!isListening) setInterimPreview("");
+  }, [isListening]);
+
+  // 片段切换：停止语音、更新基座
+  useEffect(() => {
+    stopListening();
+    confirmedTextRef.current = segState.userText;
+    setInterimPreview("");
+  }, [segment?.index]); // 仅在片段切换时触发
+
+  // 同步外部改动（如用户手动键入）到 confirmedTextRef
+  useEffect(() => {
+    if (!isListening) {
+      confirmedTextRef.current = segState.userText;
+    }
+  }, [segState.userText, isListening]);
+
+  // textarea 实际显示值 = 已确认 + 临时预览
+  const displayText = isListening && interimPreview
+    ? (segState.userText
+        ? (segState.userText.endsWith(" ") || segState.userText.endsWith("\n")
+            ? segState.userText + interimPreview
+            : segState.userText + " " + interimPreview)
+        : interimPreview)
+    : segState.userText;
 
   // ── textarea 焦点状态同步到 ref ──────────────────────────────────────────
   const handleTextareaFocus = useCallback(() => {
@@ -77,29 +140,24 @@ export function PracticePanel({
     setShowRef(false);
   }, [audioUrl]);
 
-  // ── 自动聚焦面板，确保键盘快捷键开箱即用 ────────────────────────────────
+  // ── 自动聚焦面板 ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (segment) panelRef.current?.focus();
   }, [segment]);
 
-  // ── 窗口焦点恢复 & 全屏切换后重新聚焦 ───────────────────────────────────
+  // ── 窗口焦点恢复 ─────────────────────────────────────────────────────────
   useEffect(() => {
     const win = getCurrentWindow();
     let unlistenFocus: (() => void) | undefined;
-    let unlistenResize: (() => void) | undefined;
 
-    // 应用切换回来时恢复焦点
     win.onFocusChanged(({ payload: focused }) => {
       if (focused && !textareaFocusedRef.current) {
         panelRef.current?.focus();
       }
     }).then((fn) => { unlistenFocus = fn; });
 
-    return () => {
-      unlistenFocus?.();
-      unlistenResize?.();
-    };
-  }, []); // 无依赖，只注册一次，通过 ref 读取最新状态
+    return () => { unlistenFocus?.(); };
+  }, []);
 
   // ── 播放控制 ──────────────────────────────────────────────────────────────
   const handlePlay = useCallback(() => play(), [play]);
@@ -116,45 +174,30 @@ export function PracticePanel({
     fn();
   }, [pause]);
 
-  // PracticePanel.tsx 内部
-
   const handleToggleFullscreen = useCallback(async () => {
     const win = getCurrentWindow();
     const isNowFs = await win.isFullscreen();
     const nextFs = !isNowFs;
-
-    // 1. 先切换全屏状态
     await win.setFullscreen(nextFs);
     setIsFullscreen(nextFs);
 
-    // 2. 定义一个核心的“焦点抓取”函数
     const forceRecoverFocus = async () => {
-
       try {
-        // 步骤 A: 强行拉起系统窗口焦点（解决叮叮响的关键）
         await win.setFocus();
-
-        // 步骤 B: 强行唤醒 Webview 内部环境
         window.focus();
-
-        // 步骤 C: 重新定向 DOM 焦点
         if (!textareaFocusedRef.current && panelRef.current) {
-          panelRef.current.blur(); // 先重置
-          panelRef.current.focus(); // 后聚焦
+          panelRef.current.blur();
+          panelRef.current.focus();
         }
-      } catch (e) {
-        // 忽略可能的权限报错
-      }
+      } catch (_) {}
     };
 
-    // 3. 退出全屏时，启动“三段式”恢复频率
-    // 不同的电脑和系统（macOS/Win）全屏动画时长不同，用三个频率覆盖它们
     if (!nextFs) {
-      setTimeout(forceRecoverFocus, 200);  // 动画初期尝试
-      setTimeout(forceRecoverFocus, 500);  // 动画结束尝试（大部分情况在此生效）
-      setTimeout(forceRecoverFocus, 1000); // 兜底尝试
+      setTimeout(forceRecoverFocus, 200);
+      setTimeout(forceRecoverFocus, 500);
+      setTimeout(forceRecoverFocus, 1000);
     }
-  }, [setIsFullscreen]); // 移除不必要的依赖，保持函数引用稳定
+  }, [setIsFullscreen]);
 
   useEffect(() => {
     getCurrentWindow().isFullscreen().then(setIsFullscreen);
@@ -174,8 +217,7 @@ export function PracticePanel({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       console.log("keydown:", e.key, "activeElement:", document.activeElement?.tagName);
-      const inTextarea =
-        document.activeElement === textareaRef.current;
+      const inTextarea = document.activeElement === textareaRef.current;
 
       switch (e.key) {
         case "p":
@@ -240,6 +282,13 @@ export function PracticePanel({
           setShowHelp((v) => !v);
           break;
         }
+        case "v":
+        case "V": {
+          if (inTextarea) break;
+          e.preventDefault();
+          if (!speechUnsupported) toggleListening();
+          break;
+        }
         case "i":
         case "I": {
           if (inTextarea) break;
@@ -249,12 +298,10 @@ export function PracticePanel({
         }
         case "Escape": {
           e.preventDefault();
-
           if (showHelp) {
             setShowHelp(false);
             return;
           }
-
           if (inTextarea) {
             textareaRef.current?.blur();
           }
@@ -265,11 +312,9 @@ export function PracticePanel({
 
     window.addEventListener("keydown", handler);
 
-    // 监听窗口重新获得焦点的全局事件
     const win = getCurrentWindow();
     const unlisten = win.onFocusChanged(({ payload: focused }) => {
       if (focused) {
-        // 只要窗口被激活，就强行把焦点拉回到 Webview 和 Panel
         window.focus();
         if (!textareaFocusedRef.current) {
           panelRef.current?.focus();
@@ -281,8 +326,7 @@ export function PracticePanel({
       window.removeEventListener("keydown", handler);
       unlisten.then(fn => fn());
     };
-    // 注意：只保留最稳定的依赖，或者使用 Ref 来引用变动的值
-  }, [handleTogglePlay, handleReplay, hasPrev, hasNext, navTo, onPrev, onNext, handleMarkDone, handleMarkFlagged, handleToggleFullscreen, showHelp]);
+  }, [handleTogglePlay, handleReplay, hasPrev, hasNext, navTo, onPrev, onNext, handleMarkDone, handleMarkFlagged, handleToggleFullscreen, showHelp, speechUnsupported, toggleListening]);
 
   // ── 渲染 ───────────────────────────────────────────────────────────────────
 
@@ -336,17 +380,85 @@ export function PracticePanel({
           {textareaFocused && (
             <span style={s.focusBadge}>输入中 · Esc 退出输入模式</span>
           )}
+          {/* 语音识别状态指示 */}
+          {isListening && (
+            <span style={s.speechBadge}>
+              <span style={s.speechDot} />
+              录音中
+            </span>
+          )}
+          {isTranscribing && (
+            <span style={s.transcribingBadge}>
+              <Spinner />
+              Whisper 转写中…
+            </span>
+          )}
         </div>
+
+        {/* 语音按钮 */}
+        {!speechUnsupported && (
+          <div style={s.speechRow}>
+            <button
+              style={{
+                ...s.speechBtn,
+                ...(isListening ? s.speechBtnActive : {}),
+                ...(isTranscribing ? s.speechBtnDisabled : {}),
+              }}
+              onClick={toggleListening}
+              disabled={isTranscribing}
+              title={
+                isTranscribing
+                  ? "正在转写，请稍候"
+                  : isListening
+                    ? "停止录音并转写 (V)"
+                    : "开始录音 (V)"
+              }
+            >
+              <MicIcon active={isListening} />
+              {isTranscribing
+                ? "转写中…"
+                : isListening
+                  ? "停止录音"
+                  : "语音输入"}
+              {!isTranscribing && <KbdTag>V</KbdTag>}
+            </button>
+            {isListening && interimPreview && (
+              <span style={s.interimHint}>
+                识别中：{interimPreview}
+              </span>
+            )}
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           style={{
             ...s.textarea,
-            borderColor: textareaFocused ? C.blueMid : C.border2,
-            boxShadow: textareaFocused ? `0 0 0 2px ${C.blueLt}` : "none",
+            borderColor: isListening
+              ? C.red ?? "#EF4444"
+              : isTranscribing
+                ? C.blueMid
+                : textareaFocused ? C.blueMid : C.border2,
+            boxShadow: isListening
+              ? `0 0 0 2px rgba(239,68,68,0.15)`
+              : isTranscribing
+                ? `0 0 0 2px ${C.blueLt}`
+                : textareaFocused ? `0 0 0 2px ${C.blueLt}` : "none",
           }}
-          value={segState.userText}
-          placeholder="点击此处输入，或直接开始打字…"
-          onChange={(e) => onUpdateText(e.target.value)}
+          value={displayText}
+          placeholder={
+            isListening
+              ? "正在录音，再次按 V 或点击按钮停止…"
+              : isTranscribing
+                ? "正在转写录音…"
+                : "点击此处输入，或直接开始打字…"
+          }
+          onChange={(e) => {
+            // 手动输入时停止录音（避免冲突），同步更新基座
+            if (isListening) stopListening();
+            confirmedTextRef.current = e.target.value;
+            onUpdateText(e.target.value);
+          }}
           onFocus={handleTextareaFocus}
           onBlur={handleTextareaBlur}
           rows={3}
@@ -396,6 +508,7 @@ export function PracticePanel({
           下一段 → <KbdTag>L</KbdTag>
         </Btn>
       </div>
+
       {/* 快捷键帮助弹窗 */}
       {showHelp && (
         <div style={s.modalOverlay} onClick={() => setShowHelp(false)}>
@@ -424,7 +537,7 @@ export function PracticePanel({
   );
 }
 
-// ── 快捷键数据（按分组，两列排布）────────────────────────────────────────────
+// ── 快捷键数据 ────────────────────────────────────────────────────────────────
 
 const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] }[] = [
   {
@@ -439,6 +552,7 @@ const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] 
     items: [
       { key: "I", label: "进入输入模式" },
       { key: "Esc", label: "退出输入模式" },
+      { key: "V", label: "语音输入 开/关" },
     ],
   },
   {
@@ -489,6 +603,36 @@ function KbdTag({ children }: { children: React.ReactNode }) {
   );
 }
 
+function MicIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="14" height="14" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ marginRight: 5, flexShrink: 0 }}
+    >
+      <rect x="9" y="2" width="6" height="11" rx="3" fill={active ? "currentColor" : "none"} />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+      <line x1="8" y1="22" x2="16" y2="22" />
+    </svg>
+  );
+}
+
+function Spinner() {
+  return (
+    <span style={{
+      display: "inline-block",
+      width: 10,
+      height: 10,
+      border: `1.5px solid ${C.blueLt}`,
+      borderTop: `1.5px solid ${C.blue}`,
+      borderRadius: "50%",
+      animation: "spin 0.8s linear infinite",
+      flexShrink: 0,
+    }} />
+  );
+}
+
 // ── 样式 ──────────────────────────────────────────────────────────────────────
 
 const s: Record<string, React.CSSProperties> = {
@@ -527,7 +671,7 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: C.ink3,
   },
-  kbdRow: {  // kept for potential reuse
+  kbdRow: {
     display: "flex",
     alignItems: "center",
     gap: 14,
@@ -558,6 +702,80 @@ const s: Record<string, React.CSSProperties> = {
     padding: "2px 8px",
     fontFamily: FONT.mono,
     letterSpacing: "0.04em",
+  },
+  speechBadge: {
+    fontSize: 11,
+    color: "#EF4444",
+    background: "rgba(239,68,68,0.1)",
+    borderRadius: 3,
+    padding: "2px 8px",
+    fontFamily: FONT.mono,
+    letterSpacing: "0.04em",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+  },
+  speechDot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "#EF4444",
+    display: "inline-block",
+    // pulse animation via inline style
+    animation: "pulse 1s ease-in-out infinite",
+  },
+  speechRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    flexWrap: "wrap" as const,
+  },
+  speechBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    fontFamily: FONT.sans,
+    fontSize: 12,
+    fontWeight: 500,
+    border: `0.5px solid ${C.border2}`,
+    borderRadius: 7,
+    padding: "5px 12px",
+    cursor: "pointer",
+    background: C.paper,
+    color: C.ink2,
+    transition: "all 0.15s",
+    flexShrink: 0,
+  },
+  speechBtnActive: {
+    background: "rgba(239,68,68,0.08)",
+    border: "0.5px solid rgba(239,68,68,0.4)",
+    color: "#EF4444",
+  },
+  speechBtnDisabled: {
+    opacity: 0.6,
+    cursor: "not-allowed",
+    background: C.paper2,
+  },
+  transcribingBadge: {
+    fontSize: 11,
+    color: C.blue,
+    background: C.blueLt,
+    borderRadius: 3,
+    padding: "2px 8px",
+    fontFamily: FONT.mono,
+    letterSpacing: "0.04em",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  interimHint: {
+    fontSize: 13,
+    color: C.ink3,
+    fontStyle: "italic",
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
   },
   textarea: {
     width: "100%",
@@ -646,7 +864,7 @@ const s: Record<string, React.CSSProperties> = {
     gap: 0,
     marginBottom: 16,
   },
-  modalGrid: {  // unused, kept for safety
+  modalGrid: {
     display: "flex",
     flexDirection: "column" as const,
     gap: 4,

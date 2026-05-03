@@ -11,6 +11,8 @@ interface UseAudioPlayerReturn {
   load: (urlOrPath: string) => Promise<void>;
   prefetch: (urlOrPath: string) => Promise<void>;
   play: (fromSec?: number) => void;
+  /** 播放 [start, end] 区间，到 end 自动停止，不受 loopRange 影响 */
+  playSegment: (start: number, end: number) => void;
   pause: () => void;
   seek: (sec: number) => void;
   toggle: () => void;
@@ -212,6 +214,46 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     rafRef.current = requestAnimationFrame(tick);
   }, [getCtx, stopSource, stopRaf, tick]);
 
+  // 播放一个精确区间 [start, end]，到 end 自动停止，忽略 loopRange
+  const playSegment = useCallback((start: number, end: number) => {
+    const ctx = getCtx();
+    const buffer = bufferRef.current;
+    if (!buffer || end <= start) return;
+
+    const clampedStart = Math.max(0, Math.min(start, buffer.duration));
+    const clampedEnd   = Math.max(0, Math.min(end,   buffer.duration));
+    const segDur = clampedEnd - clampedStart;
+
+    if (ctx.state === "suspended") ctx.resume().catch(console.warn);
+
+    stopSource();
+    stopRaf();
+
+    offsetRef.current = clampedStart;
+    setCurrentTime(clampedStart);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+
+    source.onended = () => {
+      stopRaf();
+      setCurrentTime(clampedEnd);
+      offsetRef.current = clampedEnd;
+      isPlayingRef.current = false;
+      setPlayState("ready");
+    };
+
+    // 精确在 segDur 秒后停止
+    source.start(0, clampedStart, segDur);
+    sourceRef.current = source;
+    startTimeRef.current = ctx.currentTime;
+    isPlayingRef.current = true;
+
+    setPlayState("playing");
+    rafRef.current = requestAnimationFrame(tick);
+  }, [getCtx, stopSource, stopRaf, tick]);
+
   const pause = useCallback(() => {
     if (!isPlayingRef.current) return;
     const ctx = getGlobalCtx();
@@ -275,6 +317,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     load,
     prefetch,
     play,
+    playSegment,
     pause,
     seek,
     toggle,

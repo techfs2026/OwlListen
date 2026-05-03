@@ -4,7 +4,8 @@ import { C, FONT } from "@/styles";
 import { ChapterList } from "./ChapterList";
 import { PlayerBar } from "./PlayerBar";
 import { useAudiobook } from "@/hooks/useAudiobook";
-import type { Chapter, RecentBook } from "@/utils/audiobookApi";
+import type { Chapter, RecentBook, AudiobookCover } from "@/utils/audiobookApi";
+import { getAudiobookCover, getRecentAudiobooks } from "@/utils/audiobookApi";
 import type { PlayState } from "@/hooks/useAudiobook";
 
 interface AudiobookScreenProps {
@@ -15,13 +16,33 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   const {
     meta, playState,
     currentChapter, currentChapterIndex, currentTime, speed,
-    recentBooks,
+    recentBooks: hookRecentBooks,
     openBook, play, pause, seekInChapter,
     goToChapter, nextChapter, prevChapter, setSpeed,
   } = useAudiobook();
 
+  // hook 里的 recentBooks 可能是异步加载的，初始为空数组。
+  // 用独立 state 管理，mount 时直接调 API，后续跟随 hook 更新。
+  const [recentBooks, setRecentBooks] = useState<RecentBook[]>([]);
+
+  // mount 时立即拉一次，不等 hook
+  useEffect(() => {
+    getRecentAudiobooks().then(setRecentBooks).catch(() => {});
+  }, []);
+
+  // hook 数据到来时（openBook 后会更新）同步覆盖
+  useEffect(() => {
+    if (hookRecentBooks.length > 0) {
+      setRecentBooks(hookRecentBooks);
+    }
+  }, [hookRecentBooks]);
+
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [cover, setCover] = useState<AudiobookCover | null>(null);
+  // Fix 3: track whether cover image has been decoded to avoid white flash
+  const [coverReady, setCoverReady] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const recentDropdownRef = useRef<HTMLDivElement>(null);
 
   // ── 打开文件 ───────────────────────────────────────────────────────────────
@@ -35,12 +56,20 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
         { name: "全部文件", extensions: ["*"] },
       ],
     });
-    if (typeof path === "string") await openBook(path);
+    if (typeof path === "string") {
+      setCover(null);
+      setCoverReady(false);
+      await openBook(path);
+      getAudiobookCover(path).then(setCover).catch(() => {});
+    }
   }, [openBook]);
 
   const handleOpenRecent = useCallback(async (book: RecentBook) => {
     setRecentOpen(false);
+    setCover(null);
+    setCoverReady(false);
     await openBook(book.path);
+    getAudiobookCover(book.path).then(setCover).catch(() => {});
   }, [openBook]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
@@ -48,7 +77,10 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     const file = e.dataTransfer.files[0];
     if (!file) return;
     const path = (file as unknown as { path?: string }).path ?? file.name;
+    setCover(null);
+    setCoverReady(false);
     await openBook(path);
+    getAudiobookCover(path).then(setCover).catch(() => {});
   }, [openBook]);
 
   // ── 点击外部关闭最近下拉 ──────────────────────────────────────────────────
@@ -64,23 +96,24 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, [recentOpen]);
 
+  // Fix 3: reset coverReady when cover object changes
+  useEffect(() => {
+    setCoverReady(false);
+  }, [cover]);
+
   // ── 键盘快捷键 ────────────────────────────────────────────────────────────
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // 忽略输入框中的按键
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
       switch (e.key) {
-        case "p":
-        case "P":
-          {
-            e.preventDefault();
-            if (playState === "playing") pause();
-            else if (playState === "ready" || playState === "paused") play();
-            break;
-          }
+        case " ":
+          e.preventDefault();
+          if (playState === "playing") pause();
+          else if (playState === "ready" || playState === "paused") play();
+          break;
         case "[":
           e.preventDefault();
           prevChapter();
@@ -89,11 +122,20 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
           e.preventDefault();
           nextChapter();
           break;
+        case "h":
+        case "H":
+          e.preventDefault();
+          setShowHelp((v) => !v);
+          break;
+        case "Escape":
+          e.preventDefault();
+          if (showHelp) setShowHelp(false);
+          break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [playState, play, pause, prevChapter, nextChapter]);
+  }, [playState, play, pause, prevChapter, nextChapter, showHelp]);
 
   const isLoading = playState === "loading";
 
@@ -128,7 +170,16 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
             <button
               style={{
                 ...s.recentChevron,
-                background: recentOpen ? C.paper2 : "transparent",
+                // 默认与"打开有声书"按钮同色，形成连体分段控件；
+                // 打开下拉时切换为浅色背景 + 深色图标
+                background: recentOpen ? C.paper2 : C.blue,
+                color: recentOpen ? C.ink2 : "#fff",
+                border: recentOpen
+                  ? `1px solid ${C.border2}`
+                  : "none",
+                borderLeft: recentOpen
+                  ? "none"
+                  : "1px solid rgba(255,255,255,0.25)",
               }}
               onClick={() => setRecentOpen((v) => !v)}
               title="最近打开"
@@ -161,16 +212,22 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
           </div>
         )}
 
-        {/* 加载指示 */}
-        {isLoading && (
-          <div style={s.loadingBadge}>
-            <span style={s.loadingDot} /> 加载中…
-          </div>
-        )}
+        {/* Fix 1: 快捷键提示按钮（参考 PracticePanel 风格） */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {isLoading && (
+            <div style={s.loadingBadge}>
+              <span style={s.loadingDot} /> 加载中…
+            </div>
+          )}
+          <button style={s.helpBtn} onClick={() => setShowHelp(true)} title="键盘快捷键 (H)">
+            快捷键 <KbdTag>H</KbdTag>
+          </button>
+        </div>
       </div>
 
       {/* ── 主体 ──────────────────────────────────────────────────────────── */}
       <div style={s.body}>
+        {/* Fix 1: 始终渲染最近书列表入口，即使 meta 为 null */}
         {meta ? (
           <>
             {/* 左：章节列表（可折叠） */}
@@ -197,11 +254,20 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
                 chapterIndex={currentChapterIndex}
                 totalChapters={meta.chapters.length}
                 playState={playState}
+                cover={cover}
+                coverReady={coverReady}
+                onCoverReady={() => setCoverReady(true)}
               />
             </div>
           </>
         ) : (
-          <EmptyState onOpen={handleOpenBook} loading={isLoading} />
+          <EmptyState
+            onOpen={handleOpenBook}
+            loading={isLoading}
+            // Fix 1: 在空状态也展示最近书，让用户无需点击"打开"也能快速访问
+            recentBooks={recentBooks}
+            onOpenRecent={handleOpenRecent}
+          />
         )}
       </div>
 
@@ -220,33 +286,111 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
         onSeek={seekInChapter}
         onSpeedChange={setSpeed}
       />
+
+      {/* ── 快捷键帮助弹窗 ─────────────────────────────────────────────────── */}
+      {showHelp && (
+        <div style={s.modalOverlay} onClick={() => setShowHelp(false)}>
+          <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={s.modalTitle}>键盘快捷键</div>
+            <div style={s.modalCols}>
+              {SHORTCUT_GROUPS.map((group) => (
+                <div key={group.group} style={s.modalColGroup}>
+                  <div style={s.modalGroup}>{group.group}</div>
+                  {group.items.map(({ key, label }) => (
+                    <div key={key} style={s.modalRow}>
+                      <kbd style={s.modalKbd}>{key}</kbd>
+                      <span style={s.modalLabel}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div style={s.modalFooter}>
+              按 <kbd style={s.modalKbd}>H</kbd> 或 <kbd style={s.modalKbd}>Esc</kbd> 关闭
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// ── 快捷键数据 ────────────────────────────────────────────────────────────────
+
+const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] }[] = [
+  {
+    group: "播放",
+    items: [
+      { key: "Space", label: "播放 / 暂停" },
+      { key: "[", label: "上一章节" },
+      { key: "]", label: "下一章节" },
+    ],
+  },
+  {
+    group: "界面",
+    items: [
+      { key: "H", label: "显示 / 隐藏帮助" },
+    ],
+  },
+];
 
 // ── 正在播放面板 ───────────────────────────────────────────────────────────────
 
 import type { AudiobookMeta } from "@/utils/audiobookApi";
 
 function NowPlaying({
-  meta, chapter, chapterIndex, totalChapters, playState,
+  meta, chapter, chapterIndex, totalChapters, playState, cover, coverReady, onCoverReady,
 }: {
   meta: AudiobookMeta;
   chapter: Chapter | null;
   chapterIndex: number;
   totalChapters: number;
   playState: PlayState;
+  cover: AudiobookCover | null;
+  coverReady: boolean;
+  onCoverReady: () => void;
 }) {
-  // 从书名生成一个稳定的渐变色
+  const [imgError, setImgError] = useState(false);
   const gradient = titleToGradient(meta.title);
+
+  // Fix 3: only use coverSrc after image has decoded successfully
+  const coverSrc = cover && !imgError
+    ? `data:${cover.mimeType};base64,${cover.data}`
+    : null;
+
+  // 切换书时重置图片错误状态
+  useEffect(() => { setImgError(false); }, [cover]);
+
+  // Fix 3: show gradient background until img onLoad fires, prevents white flash
+  const showCover = coverSrc && coverReady;
 
   return (
     <div style={np.wrap}>
-      {/* 封面占位 */}
-      <div style={{ ...np.cover, background: gradient }}>
-        <span style={np.coverInitial}>
-          {(meta.title || "?")[0].toUpperCase()}
-        </span>
+      {/* 封面 */}
+      <div style={{
+        ...np.cover,
+        background: showCover ? "transparent" : gradient,
+      }}>
+        {coverSrc && (
+          <img
+            src={coverSrc}
+            alt={meta.title}
+            style={{
+              ...np.coverImg,
+              // keep invisible until decoded, so gradient shows through instead of white
+              opacity: coverReady ? 1 : 0,
+              transition: "opacity 0.2s ease",
+            }}
+            draggable={false}
+            onLoad={onCoverReady}
+            onError={() => setImgError(true)}
+          />
+        )}
+        {!showCover && (
+          <span style={np.coverInitial}>
+            {(meta.title || "?")[0].toUpperCase()}
+          </span>
+        )}
         {playState === "playing" && (
           <div style={np.playingBadge}>
             <PlayingDots />
@@ -318,7 +462,18 @@ function PlayingDots() {
 
 // ── 空状态 ────────────────────────────────────────────────────────────────────
 
-function EmptyState({ onOpen, loading }: { onOpen: () => void; loading: boolean }) {
+// Fix 1: EmptyState now receives and shows recentBooks
+function EmptyState({
+  onOpen,
+  loading,
+  recentBooks,
+  onOpenRecent,
+}: {
+  onOpen: () => void;
+  loading: boolean;
+  recentBooks: RecentBook[];
+  onOpenRecent: (book: RecentBook) => void;
+}) {
   return (
     <div style={es.wrap}>
       <div style={es.icon}>📖</div>
@@ -328,11 +483,51 @@ function EmptyState({ onOpen, loading }: { onOpen: () => void; loading: boolean 
         <button style={es.btn} onClick={onOpen}>选择文件</button>
       )}
       {!loading && <p style={es.dragHint}>或直接拖入文件</p>}
+
+      {/* Fix 1: 最近打开书单，直接显示在空状态页面 */}
+      {!loading && recentBooks.length > 0 && (
+        <div style={es.recentSection}>
+          <div style={es.recentHeader}>最近打开</div>
+          <div style={es.recentList}>
+            {recentBooks.map((book) => (
+              <button
+                key={book.path}
+                style={es.recentItem}
+                onClick={() => onOpenRecent(book)}
+              >
+                <div style={es.recentEmoji}>📚</div>
+                <div style={es.recentMeta}>
+                  <div style={es.recentTitle}>{book.title || pathBasename(book.path)}</div>
+                  {book.author && <div style={es.recentAuthor}>{book.author}</div>}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── 图标组件 ──────────────────────────────────────────────────────────────────
+
+function KbdTag({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd style={{
+      fontFamily: FONT.mono,
+      fontSize: 9,
+      background: "rgba(0,0,0,0.06)",
+      border: `0.5px solid ${C.border2}`,
+      borderRadius: 3,
+      padding: "0 4px",
+      marginLeft: 5,
+      verticalAlign: "middle",
+      color: C.ink3,
+    }}>
+      {children}
+    </kbd>
+  );
+}
 
 function SidebarIcon({ open }: { open: boolean }) {
   return (
@@ -340,10 +535,8 @@ function SidebarIcon({ open }: { open: boolean }) {
       <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.2" />
       <line x1="5" y1="2" x2="5" y2="14" stroke="currentColor" strokeWidth="1.2" />
       {open ? (
-        // 左箭头（收起）
         <path d="M8.5 6L6.5 8L8.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
       ) : (
-        // 右箭头（展开）
         <path d="M7.5 6L9.5 8L7.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
       )}
     </svg>
@@ -423,6 +616,21 @@ const s: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     borderRadius: 6,
+    flexShrink: 0,
+    transition: "background 0.1s, color 0.1s",
+  },
+  helpBtn: {
+    fontFamily: FONT.sans,
+    fontSize: 12,
+    fontWeight: 500,
+    background: "none",
+    border: `0.5px solid ${C.border2}`,
+    borderRadius: 6,
+    padding: "4px 10px",
+    cursor: "pointer",
+    color: C.ink3,
+    display: "flex",
+    alignItems: "center",
     flexShrink: 0,
     transition: "background 0.1s, color 0.1s",
   },
@@ -567,6 +775,85 @@ const s: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     overflow: "hidden",
   },
+  // Modal styles
+  modalOverlay: {
+    position: "fixed" as const,
+    inset: 0,
+    background: "rgba(0,0,0,0.45)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 9999,
+  },
+  modalBox: {
+    background: C.paper,
+    border: `0.5px solid ${C.border}`,
+    borderRadius: 16,
+    padding: "32px 36px",
+    width: 480,
+    maxWidth: "90vw",
+    boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+  },
+  modalTitle: {
+    fontFamily: FONT.mono,
+    fontSize: 13,
+    letterSpacing: "0.10em",
+    textTransform: "uppercase" as const,
+    color: C.ink3,
+    marginBottom: 24,
+  },
+  modalCols: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "4px 32px",
+  },
+  modalColGroup: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 0,
+    marginBottom: 16,
+  },
+  modalGroup: {
+    fontFamily: FONT.mono,
+    fontSize: 10,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase" as const,
+    color: C.ink3,
+    marginBottom: 6,
+    borderBottom: `0.5px solid ${C.border}`,
+    paddingBottom: 4,
+  },
+  modalRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "5px 0",
+  },
+  modalKbd: {
+    fontFamily: FONT.mono,
+    fontSize: 11,
+    background: C.paper3,
+    border: `0.5px solid ${C.border2}`,
+    borderRadius: 4,
+    padding: "2px 8px",
+    color: C.ink2,
+    boxShadow: `0 1px 0 ${C.border2}`,
+    minWidth: 40,
+    textAlign: "center" as const,
+    flexShrink: 0,
+  },
+  modalLabel: {
+    fontSize: 13,
+    color: C.ink,
+    fontFamily: FONT.sans,
+  },
+  modalFooter: {
+    marginTop: 24,
+    fontSize: 12,
+    color: C.ink3,
+    fontFamily: FONT.mono,
+    textAlign: "center" as const,
+  },
 };
 
 const np: Record<string, React.CSSProperties> = {
@@ -576,27 +863,38 @@ const np: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 20,
     padding: "40px 48px",
-    maxWidth: 640,   // 从 480 加宽到 640
+    maxWidth: 640,
     width: "100%",
   },
   cover: {
-    width: 180,
-    height: 180,
-    borderRadius: 16,
+    width: 260,
+    height: 260,
+    borderRadius: 20,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     position: "relative" as const,
-    boxShadow: "0 12px 40px rgba(0,0,0,0.2)",
+    boxShadow: "0 16px 48px rgba(0,0,0,0.25)",
     flexShrink: 0,
+    overflow: "hidden" as const,
   },
   coverInitial: {
-    fontSize: 72,
+    fontSize: 96,
     fontWeight: 700,
     color: "rgba(255,255,255,0.9)",
     fontFamily: FONT.sans,
     lineHeight: 1,
     userSelect: "none",
+    // Fix 3: position absolute so img can overlap it when ready
+    position: "absolute" as const,
+  },
+  coverImg: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover" as const,
+    display: "block",
+    position: "absolute" as const,
+    inset: 0,
   },
   playingBadge: {
     position: "absolute" as const,
@@ -608,6 +906,7 @@ const np: Record<string, React.CSSProperties> = {
     padding: "4px 8px",
     display: "flex",
     alignItems: "center",
+    zIndex: 1,
   },
   bookMeta: {
     display: "flex",
@@ -622,7 +921,6 @@ const np: Record<string, React.CSSProperties> = {
     color: C.ink,
     textAlign: "center" as const,
     lineHeight: 1.35,
-    // 允许换行，不截断
     wordBreak: "break-word" as const,
   },
   bookAuthor: {
@@ -655,7 +953,6 @@ const np: Record<string, React.CSSProperties> = {
     fontWeight: 600,
     color: C.ink,
     lineHeight: 1.5,
-    // 允许换行，不截断
     wordBreak: "break-word" as const,
     alignSelf: "center",
   },
@@ -670,6 +967,8 @@ const es: Record<string, React.CSSProperties> = {
     justifyContent: "center",
     gap: 12,
     color: C.ink3,
+    padding: "32px 24px",
+    overflowY: "auto",
   },
   icon: { fontSize: 48, lineHeight: 1, marginBottom: 4 },
   title: { fontSize: 16, color: C.ink2, fontWeight: 500 },
@@ -687,4 +986,62 @@ const es: Record<string, React.CSSProperties> = {
     marginTop: 8,
   },
   dragHint: { fontSize: 12, color: C.border2, fontFamily: FONT.mono },
+  recentSection: {
+    marginTop: 24,
+    width: "100%",
+    maxWidth: 360,
+  },
+  recentHeader: {
+    fontFamily: FONT.mono,
+    fontSize: 10,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase" as const,
+    color: C.ink3,
+    marginBottom: 10,
+    paddingBottom: 6,
+    borderBottom: `0.5px solid ${C.border}`,
+  },
+  recentList: {
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 4,
+  },
+  recentItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    textAlign: "left" as const,
+    background: C.paper,
+    border: `0.5px solid ${C.border}`,
+    borderRadius: 8,
+    padding: "10px 14px",
+    cursor: "pointer",
+    transition: "background 0.1s",
+  },
+  recentEmoji: {
+    fontSize: 20,
+    flexShrink: 0,
+  },
+  recentMeta: {
+    overflow: "hidden",
+    flex: 1,
+    minWidth: 0,
+  },
+  recentTitle: {
+    fontSize: 13,
+    fontWeight: 500,
+    color: C.ink,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  recentAuthor: {
+    fontSize: 11,
+    color: C.ink3,
+    marginTop: 2,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
 };

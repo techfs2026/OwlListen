@@ -27,6 +27,11 @@ export interface RecentBook {
   lastOpened: number; // Unix timestamp (seconds)
 }
 
+export interface AudiobookCover {
+  data: string;      // base64
+  mimeType: string;  // "image/jpeg" | "image/png"
+}
+
 export async function loadAudiobook(path: string): Promise<AudiobookMeta> {
   return invoke<AudiobookMeta>("load_audiobook", { path });
 }
@@ -53,6 +58,10 @@ export async function pushRecentAudiobook(
   author: string,
 ): Promise<void> {
   return invoke("push_recent_audiobook", { bookPath, title, author });
+}
+
+export async function getAudiobookCover(path: string): Promise<AudiobookCover | null> {
+  return invoke<AudiobookCover | null>("get_audiobook_cover", { path });
 }
 
 export function toAssetUrl(path: string): string {

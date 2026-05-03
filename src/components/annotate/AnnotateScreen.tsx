@@ -73,7 +73,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   const {
     playState, currentTime,
     loopRange,
-    load: loadAudio, play, pause, seek, unload: unloadAudio, setLoop,
+    load: loadAudio, play, playSegment, pause, seek, unload: unloadAudio, setLoop,
   } = useAudioPlayer();
 
   const [renderData, setRenderData] = useState<RenderData | null>(null);
@@ -465,7 +465,14 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         const viewDur = viewRange.endSec - viewRange.startSec;
         const newStart = Math.max(0, target.start - viewDur * 0.25);
         setViewRange({ startSec: newStart, endSec: newStart + viewDur });
-        seek(target.start);
+
+        if (loopRange) {
+          setLoop([target.start, target.end]);
+          seek(target.start);
+          play(target.start);
+        } else {
+          playSegment(target.start, target.end);
+        }
         return;
       }
     };
@@ -473,7 +480,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [
-    playState, play, pause, loadingState,
+    playState, play, playSegment, pause, loadingState,
     currentTime,
     loopRange, setLoop, labels, seek,
     absSilenceRegions, viewRange, setViewRange,
@@ -566,7 +573,15 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
           if (label) {
             const pad = (label.end - label.start) * 0.2;
             setViewRange({ startSec: Math.max(0, label.start - pad), endSec: label.end + pad });
-            seek(label.start);
+            if (loopRange) {
+              // loop 模式：切换 loop 区间并从头播
+              setLoop([label.start, label.end]);
+              seek(label.start);
+              play(label.start);
+            } else {
+              // 非 loop 模式：播放片段到终点自动停
+              playSegment(label.start, label.end);
+            }
           }
         }}
         onRemove={(id) => {

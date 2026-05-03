@@ -19,6 +19,9 @@ pub struct AppState {
     pub summary: Mutex<Option<crate::waveform::WaveformSummary>>,
     /// 当前加载的音频文件路径（切割时用）
     pub audio_path: Mutex<Option<String>>,
+    /// 缓存的 Whisper 模型上下文。第一次转写时加载，之后复用。
+    /// 用 (model_name, ctx) 元组：切换模型时自动重建。
+    pub whisper_ctx: Mutex<Option<(String, whisper_rs::WhisperContext)>>,
 }
 
 impl AppState {
@@ -26,6 +29,7 @@ impl AppState {
         Self {
             summary: Mutex::new(None),
             audio_path: Mutex::new(None),
+            whisper_ctx: Mutex::new(None),
         }
     }
 }
@@ -356,6 +360,91 @@ pub fn transcribe_segments(
     Ok(results)
 }
 
+fn get_or_load_whisper_ctx<'a>(
+    state: &'a State<AppState>,
+    model: &str,
+) -> Result<std::sync::MutexGuard<'a, Option<(String, whisper_rs::WhisperContext)>>, String> {
+    use whisper_rs::{WhisperContext, WhisperContextParameters};
+ 
+    let mut guard = state.whisper_ctx.lock().unwrap();
+ 
+    // 已经加载且型号匹配 → 直接返回
+    let needs_load = match &*guard {
+        Some((cached_model, _)) if cached_model == model => false,
+        _ => true,
+    };
+ 
+    if needs_load {
+        let model_path = model_path_for(model);
+        if !model_path.exists() {
+            return Err(format!(
+                "Whisper 模型文件不存在：{}\n请运行 scripts/download_model.sh {} 下载",
+                model_path.display(), model
+            ));
+        }
+ 
+        log::info!("Loading Whisper model: {} from {}", model, model_path.display());
+        let ctx = WhisperContext::new_with_params(
+            model_path.to_str().ok_or("model path is not valid UTF-8")?,
+            WhisperContextParameters::default(),
+        ).map_err(|e| format!("Load whisper model: {e}"))?;
+ 
+        *guard = Some((model.to_string(), ctx));
+    }
+ 
+    Ok(guard)
+}
+
+#[tauri::command]
+pub fn transcribe_recording(
+    audio_bytes: Vec<u8>,
+    extension: String,
+    model: Option<String>,
+    state: State<AppState>,
+) -> Result<String, String> {
+    use std::io::Write;
+ 
+    let model = model.unwrap_or_else(|| "base".to_string());
+ 
+    if audio_bytes.is_empty() {
+        return Err("Empty audio data".into());
+    }
+ 
+    // 1. 写到临时文件（复用 get_temp_dir 同一目录）
+    let dir = std::env::temp_dir().join("langlisten_recordings");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create tmp dir: {e}"))?;
+ 
+    // 用纳秒级时间戳避免并发冲突
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let safe_ext = extension.trim_start_matches('.').to_lowercase();
+    let tmp_path = dir.join(format!("rec_{timestamp}.{safe_ext}"));
+ 
+    {
+        let mut f = std::fs::File::create(&tmp_path)
+            .map_err(|e| format!("create tmp file: {e}"))?;
+        f.write_all(&audio_bytes)
+            .map_err(|e| format!("write tmp file: {e}"))?;
+    }
+ 
+    // 2. 复用 transcribe_one（内部走 decode_audio + downmix_to_mono + Whisper）
+    let result = {
+        let guard = get_or_load_whisper_ctx(&state, &model)?;
+        let (_, ctx) = guard.as_ref().expect("ctx is loaded");
+        transcribe_one(ctx, tmp_path.to_str().ok_or("tmp path not utf-8")?)
+            .map_err(|e| format!("transcribe: {e}"))
+    };
+ 
+    // 3. 删除临时文件（不影响主流程，失败仅记日志）
+    if let Err(e) = std::fs::remove_file(&tmp_path) {
+        log::warn!("Remove tmp recording {} failed: {}", tmp_path.display(), e);
+    }
+ 
+    result
+}
+
 fn model_path_for(model: &str) -> PathBuf {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -565,4 +654,74 @@ fn app_data_dir(app: &AppHandle) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .to_string()
+}
+
+/// 提取有声书内嵌封面，返回 base64 编码的图片数据和 MIME 类型
+/// 如果没有封面返回 None
+#[tauri::command]
+pub fn get_audiobook_cover(path: String) -> Option<CoverDto> {
+    extract_cover(&path).ok().flatten()
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CoverDto {
+    pub data: String,       // base64
+    pub mime_type: String,  // "image/jpeg" | "image/png"
+}
+
+fn extract_cover(path: &str) -> anyhow::Result<Option<CoverDto>> {
+    use ffmpeg_next as ffmpeg;
+    use anyhow::Context;
+
+    ffmpeg::init().context("FFmpeg init")?;
+    let input = ffmpeg::format::input(&path)
+        .with_context(|| format!("Cannot open: {path}"))?;
+
+    // 优先找 ATTACHED_PIC 标志的流，其次找任意 Video 流
+    // 用 parameters().medium() 而不是 codec().medium()（新版 ffmpeg-next API）
+    let stream_index = input.streams().find(|s| {
+        use ffmpeg_next::format::stream::disposition::Disposition;
+        s.disposition().contains(Disposition::ATTACHED_PIC)
+    })
+    .or_else(|| {
+        input.streams().find(|s| {
+            s.parameters().medium() == ffmpeg_next::media::Type::Video
+        })
+    })
+    .map(|s| s.index());
+
+    let stream_index = match stream_index {
+        Some(i) => i,
+        None => return Ok(None),
+    };
+
+    // 重新打开文件读 packet（避免生命周期问题）
+    let mut input2 = ffmpeg::format::input(&path)
+        .with_context(|| format!("Cannot reopen: {path}"))?;
+
+    for (stream, packet) in input2.packets() {
+        if stream.index() != stream_index { continue; }
+        let data = match packet.data() {
+            Some(d) if !d.is_empty() => d,
+            _ => break,
+        };
+
+        // 判断图片格式：JPEG = FF D8 FF，PNG = 89 50 4E 47
+        let mime_type = if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            "image/jpeg"
+        } else if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+            "image/png"
+        } else {
+            "image/jpeg" // 兜底
+        };
+
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        return Ok(Some(CoverDto {
+            data: STANDARD.encode(data),
+            mime_type: mime_type.to_string(),
+        }));
+    }
+
+    Ok(None)
 }
