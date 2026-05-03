@@ -6,13 +6,14 @@ interface LabelListProps {
   labels: Label[];
   duration: number;
   selectedId: string | null;
+  overlappingIds: Set<string>;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   onJumpTo: (start: number, end: number) => void;
   onUpdateText: (id: string, text: string) => void;
 }
 
-export function LabelList({ labels, selectedId, onSelect, onRemove, onJumpTo, onUpdateText }: LabelListProps) {
+export function LabelList({ labels, selectedId, overlappingIds, onSelect, onRemove, onJumpTo, onUpdateText }: LabelListProps) {
   return (
     <div style={s.container}>
       {labels.length === 0 ? (
@@ -28,6 +29,7 @@ export function LabelList({ labels, selectedId, onSelect, onRemove, onJumpTo, on
               label={label}
               index={idx + 1}
               selected={label.id === selectedId}
+              overlapping={overlappingIds.has(label.id)}
               onSelect={() => onSelect(label.id)}
               onRemove={() => onRemove(label.id)}
               onJumpTo={() => onJumpTo(label.start, label.end)}
@@ -50,6 +52,7 @@ interface LabelCardProps {
   label: Label;
   index: number;
   selected: boolean;
+  overlapping: boolean;
   onSelect: () => void;
   onRemove: () => void;
   onJumpTo: () => void;
@@ -66,26 +69,28 @@ function fmtDur(sec: number): string {
   return sec < 1 ? `${(sec * 1000).toFixed(0)}ms` : `${sec.toFixed(2)}s`;
 }
 
-function LabelCard({ label, index, selected, onSelect, onRemove, onJumpTo, onUpdateText }: LabelCardProps) {
+function LabelCard({ label, index, selected, overlapping, onSelect, onRemove, onJumpTo, onUpdateText }: LabelCardProps) {
   const cardStyle: React.CSSProperties = {
     ...s.card,
-    borderColor: selected ? C.blue : undefined,
-    boxShadow: selected
+    borderColor: overlapping ? "#FCA5A5" : selected ? C.blue : undefined,
+    boxShadow: overlapping
+      ? "0 0 0 2px #FEE2E2"
+      : selected
       ? `0 0 0 2px ${C.blueLt}, 0 1px 3px rgba(26,39,68,0.08)`
       : "0 1px 3px rgba(26,39,68,0.05)",
-    background: selected ? C.blueLt : C.paper,
+    background: overlapping ? "#FFF5F5" : selected ? C.blueLt : C.paper,
   };
 
   return (
     <div style={cardStyle} onClick={onSelect}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ ...s.cardNum, color: selected ? C.blue : C.ink3 }}>#{index}</div>
-        {selected && (
-          <div style={s.selectedBadge}>
-            <span style={s.selectedDot} />
-            选中
-          </div>
-        )}
+        <div style={{ ...s.cardNum, color: overlapping ? "#DC2626" : selected ? C.blue : C.ink3 }}>#{index}</div>
+        <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+          {overlapping && <div style={s.overlapBadge}>⚠ 重叠</div>}
+          {selected && !overlapping && (
+            <div style={s.selectedBadge}><span style={s.selectedDot} />选中</div>
+          )}
+        </div>
       </div>
       <div style={s.cardTimes}>
         <span style={s.t}>{fmtTime(label.start)}</span>
@@ -102,7 +107,7 @@ function LabelCard({ label, index, selected, onSelect, onRemove, onJumpTo, onUpd
         style={s.cardInput}
         value={label.text}
         placeholder="备注"
-        onClick={(e) => e.stopPropagation()} // 不触发 card onSelect
+        onClick={(e) => e.stopPropagation()}
         onChange={(e) => onUpdateText(e.target.value)}
       />
       <div style={s.cardActions}>
@@ -186,6 +191,17 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: 8,
     padding: "2px 7px",
     letterSpacing: "0.04em",
+  },
+  overlapBadge: {
+    fontSize: 10,
+    fontFamily: FONT.mono,
+    color: "#DC2626",
+    background: "#FEE2E2",
+    border: "0.5px solid #FCA5A5",
+    borderRadius: 8,
+    padding: "2px 7px",
+    letterSpacing: "0.04em",
+    fontWeight: 600,
   },
   selectedDot: {
     width: 5,

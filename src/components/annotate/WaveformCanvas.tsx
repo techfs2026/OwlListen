@@ -11,6 +11,7 @@ interface WaveformCanvasProps {
   playhead: number;
   labels: Label[];
   selectedId?: string | null;
+  overlappingIds?: Set<string>;
   colors?: Partial<WaveformColors>;
   silenceRegions?: SilenceRegion[];
   loopRange?: [number, number] | null;
@@ -39,6 +40,7 @@ export function WaveformCanvas({
   playhead,
   labels,
   selectedId = null,
+  overlappingIds,
   colors: colorOverrides,
   silenceRegions,
   loopRange,
@@ -229,6 +231,7 @@ export function WaveformCanvas({
       start: secToRatio(l.start),
       end: secToRatio(l.end),
       selected: l.id === selectedId,
+      overlapping: overlappingIds?.has(l.id) ?? false,
     }));
 
     const normalizedLoop = loopRange

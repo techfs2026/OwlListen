@@ -38,7 +38,7 @@ export interface RenderParams {
   data: RenderData | null;
   playhead: number;
   dragRange: [number, number] | null;
-  labels: Array<{ start: number; end: number; selected?: boolean }>;
+  labels: Array<{ start: number; end: number; selected?: boolean; overlapping?: boolean }>;
   colors: WaveformColors;
   /** 静音区间（归一化，相对于当前 viewRange） */
   silenceRegions?: SilenceRegion[];
@@ -212,7 +212,7 @@ function drawLabelsAndSelection(
   uColor: WebGLUniformLocation | null,
   w: number,
   h: number,
-  labels: Array<{ start: number; end: number; selected?: boolean }>,
+  labels: Array<{ start: number; end: number; selected?: boolean; overlapping?: boolean }>,
   dragRange: [number, number] | null,
   colors: WaveformColors,
 ) {
@@ -223,17 +223,22 @@ function drawLabelsAndSelection(
       const lx = lbl.start * w;
       const rx = lbl.end * w;
       if (lbl.selected) {
-        // 选中：更深填充 + 橙色粗边框（左右各两条紧邻线模拟 2px）
+        // 选中：蓝色填充 + 橙色粗边框
         gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.65);
         uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
-        // 橙色 #F97316
-        gl.uniform4f(uColor, 0.976, 0.451, 0.086, 1.0);
+        gl.uniform4f(uColor, 0.976, 0.451, 0.086, 1.0); // #F97316 橙色
         uploadAndDraw(gl, vbo, new Float32Array([
           lx,     0, lx,     h,
           lx + 1, 0, lx + 1, h,
           rx - 1, 0, rx - 1, h,
           rx,     0, rx,     h,
         ]), gl.LINES);
+      } else if (lbl.overlapping) {
+        // 重叠：红色填充 + 红色边框
+        gl.uniform4f(uColor, 0.95, 0.20, 0.20, 0.25);
+        uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
+        gl.uniform4f(uColor, 0.85, 0.10, 0.10, 0.90); // 深红
+        uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
       } else {
         gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.4);
         uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);

@@ -101,6 +101,21 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       }));
   }, [absSilenceRegions, viewRange]);
 
+  // 重叠检测：O(n²)，label 数量通常 < 200 完全可接受
+  const overlappingIds = useMemo<Set<string>>(() => {
+    const ids = new Set<string>();
+    for (let i = 0; i < labels.length; i++) {
+      for (let j = i + 1; j < labels.length; j++) {
+        const a = labels[i], b = labels[j];
+        if (a.start < b.end && a.end > b.start) {
+          ids.add(a.id);
+          ids.add(b.id);
+        }
+      }
+    }
+    return ids;
+  }, [labels]);
+
   // ── 峰值刷新 ──────────────────────────────────────────────────────────────
 
   const rafIdRef = useRef<number>(0);
@@ -234,12 +249,33 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   const handleSeek = useCallback((sec: number) => seek(sec), [seek]);
 
+  // 边界吸附：把 sec 吸到最近的静音边缘，阈值 = 视图时长 × 1%
+  const snapToSilence = useCallback((sec: number): number => {
+    if (absSilenceRegions.length === 0) return sec;
+    const threshold = (viewRange.endSec - viewRange.startSec) * 0.01;
+    let best = sec;
+    let bestDist = threshold;
+    for (const r of absSilenceRegions) {
+      const ds = Math.abs(sec - r.start);
+      const de = Math.abs(sec - r.end);
+      if (ds < bestDist) { bestDist = ds; best = r.start; }
+      if (de < bestDist) { bestDist = de; best = r.end; }
+    }
+    return best;
+  }, [absSilenceRegions, viewRange]);
+
   const handleRegionSelected = useCallback(
     (start: number, end: number) => {
-      const label = addLabel(start, end);
+      const snappedStart = snapToSilence(start);
+      const snappedEnd   = snapToSilence(end);
+      const label = addLabel(snappedStart, snappedEnd);
       setSelectedId(label.id);
+      // 拖完自动开回环，立刻进入精听节奏
+      setLoop([snappedStart, snappedEnd]);
+      seek(snappedStart);
+      play(snappedStart);
     },
-    [addLabel]
+    [addLabel, snapToSilence, setLoop, seek, play]
   );
 
   const handleZoom = useCallback(
@@ -259,21 +295,22 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     [setViewRange, seek]
   );
 
-  // 功能2：label 边缘拖拽
+  // 边缘拖拽 + 吸附
   const handleLabelEdgeDrag = useCallback(
     (id: string, edge: "start" | "end", newSec: number) => {
       const label = labels.find((l) => l.id === id);
       if (!label) return;
       const clamped = Math.max(0, Math.min(newSec, audioInfo?.duration ?? Infinity));
+      const snapped = snapToSilence(clamped);
       if (edge === "start") {
-        const newStart = Math.min(clamped, label.end - 0.05);
+        const newStart = Math.min(snapped, label.end - 0.05);
         updateLabel(id, { start: newStart });
       } else {
-        const newEnd = Math.max(clamped, label.start + 0.05);
+        const newEnd = Math.max(snapped, label.start + 0.05);
         updateLabel(id, { end: newEnd });
       }
     },
-    [labels, updateLabel, audioInfo]
+    [labels, updateLabel, audioInfo, snapToSilence]
   );
 
   const handleDrop = useCallback(
@@ -500,6 +537,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
             playhead={currentTime}
             labels={labels}
             selectedId={selectedId}
+            overlappingIds={overlappingIds}
             silenceRegions={silenceRegions}
             loopRange={loopRange}
             onSeek={handleSeek}
@@ -521,6 +559,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         labels={labels}
         duration={audioInfo?.duration ?? 0}
         selectedId={selectedId}
+        overlappingIds={overlappingIds}
         onSelect={(id) => {
           setSelectedId(id);
           const label = labels.find((l) => l.id === id);

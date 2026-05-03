@@ -1,6 +1,7 @@
 mod audio;
 mod commands;
 mod waveform;
+mod audiobook;
 
 use commands::AppState;
 
@@ -19,6 +20,9 @@ pub fn run() {
             commands::transcribe_segments,
             commands::build_zip,
             commands::reveal_in_finder,
+            commands::load_audiobook,
+            commands::get_audiobook_progress,
+            commands::save_audiobook_progress,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

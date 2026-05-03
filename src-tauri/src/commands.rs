@@ -6,6 +6,12 @@ use tauri::State;
 
 use crate::audio::decode_audio;
 use crate::waveform::{self, builder, ViewRange};
+use crate::audiobook::{parse_audiobook, AudiobookMeta};
+use crate::audiobook::{get_progress, set_progress, BookProgress};
+
+
+use tauri::AppHandle;
+use tauri::Manager;
 
 // ── AppState ──────────────────────────────────────────────────────────────────
 
@@ -577,4 +583,45 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// 解析有声书元数据（章节列表、书名、作者、时长）
+#[tauri::command]
+pub fn load_audiobook(path: String) -> Result<AudiobookMeta, String> {
+    parse_audiobook(&path).map_err(|e| e.to_string())
+}
+ 
+/// 读取播放进度
+#[tauri::command]
+pub fn get_audiobook_progress(
+    app: AppHandle,
+    book_path: String,
+) -> BookProgress {
+    let dir = app_data_dir(&app);
+    get_progress(&dir, &book_path)
+}
+ 
+/// 保存播放进度（每隔几秒调用一次即可）
+#[tauri::command]
+pub fn save_audiobook_progress(
+    app: AppHandle,
+    book_path: String,
+    chapter_index: usize,
+    position_sec: f64,
+) -> Result<(), String> {
+    let dir = app_data_dir(&app);
+    set_progress(
+        &dir,
+        &book_path,
+        BookProgress { chapter_index, position_sec },
+    )
+    .map_err(|e| e.to_string())
+}
+ 
+fn app_data_dir(app: &AppHandle) -> String {
+    app.path()
+        .app_data_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string()
 }
