@@ -3,9 +3,12 @@ import {
   loadAudiobook,
   getAudiobookProgress,
   saveAudiobookProgress,
+  getRecentAudiobooks,
+  pushRecentAudiobook,
   toAssetUrl,
   type AudiobookMeta,
   type Chapter,
+  type RecentBook,
 } from "@/utils/audiobookApi";
 
 export type PlayState = "idle" | "loading" | "ready" | "playing" | "paused";
@@ -23,6 +26,7 @@ export interface UseAudiobookReturn {
   currentChapterIndex: number;
   currentTime: number;
   speed: Speed;
+  recentBooks: RecentBook[];
   openBook: (path: string) => Promise<void>;
   play: () => void;
   pause: () => void;
@@ -39,8 +43,6 @@ function getCtx(): AudioContext {
   return globalCtx;
 }
 
-// m4b 是单个大文件，整本书解码一次缓存
-// key = 文件路径
 const bookCache = new Map<string, AudioBuffer>();
 
 export function useAudiobook(): UseAudiobookReturn {
@@ -50,19 +52,19 @@ export function useAudiobook(): UseAudiobookReturn {
   const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [speed, setSpeedState] = useState<Speed>(1);
+  const [recentBooks, setRecentBooks] = useState<RecentBook[]>([]);
 
   const bookPathRef        = useRef("");
   const metaRef            = useRef<AudiobookMeta | null>(null);
   const chapterIndexRef    = useRef(0);
   const sourceRef          = useRef<AudioBufferSourceNode | null>(null);
-  const offsetRef          = useRef(0);   // 全局秒数（相对整本书）
+  const offsetRef          = useRef(0);
   const startCtxTimeRef    = useRef(0);
   const isPlayingRef       = useRef(false);
   const rafRef             = useRef(0);
   const speedRef           = useRef<Speed>(1);
   const saveTimerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
-  // 用于打破 goToChapter ↔ onended 循环依赖
-  const jumpRef            = useRef<(globalSec: number) => void>(() => {});
+  const bufferRef          = useRef<AudioBuffer | null>(null);
 
   // ── 工具 ──────────────────────────────────────────────────────────────────
 
@@ -83,7 +85,6 @@ export function useAudiobook(): UseAudiobookReturn {
     if (saveTimerRef.current) { clearInterval(saveTimerRef.current); saveTimerRef.current = null; }
   }, []);
 
-  // 当前全局播放位置（秒）
   const globalPos = useCallback((): number => {
     if (!isPlayingRef.current) return offsetRef.current;
     const ctx = getCtx();
@@ -91,7 +92,6 @@ export function useAudiobook(): UseAudiobookReturn {
     return offsetRef.current + Math.max(0, elapsed);
   }, []);
 
-  // 全局秒 → 章节索引
   const secToChapter = useCallback((globalSec: number): number => {
     const chapters = metaRef.current?.chapters ?? [];
     for (let i = chapters.length - 1; i >= 0; i--) {
@@ -100,7 +100,6 @@ export function useAudiobook(): UseAudiobookReturn {
     return 0;
   }, []);
 
-  // tick：rAF 驱动 currentTime + chapter index
   const tick = useCallback(() => {
     if (!isPlayingRef.current) return;
     const pos = globalPos();
@@ -115,7 +114,7 @@ export function useAudiobook(): UseAudiobookReturn {
     rafRef.current = requestAnimationFrame(tick);
   }, [globalPos, secToChapter]);
 
-  // ── 解码整本书 ────────────────────────────────────────────────────────────
+  // ── 解码 ──────────────────────────────────────────────────────────────────
 
   const decodeBook = useCallback(async (path: string): Promise<AudioBuffer> => {
     if (bookCache.has(path)) return bookCache.get(path)!;
@@ -127,7 +126,7 @@ export function useAudiobook(): UseAudiobookReturn {
     return buf;
   }, []);
 
-  // ── 核心播放（全局秒数定位）──────────────────────────────────────────────
+  // ── 核心播放 ──────────────────────────────────────────────────────────────
 
   const startPlayback = useCallback((buffer: AudioBuffer, fromGlobalSec: number) => {
     const ctx = getCtx();
@@ -144,7 +143,6 @@ export function useAudiobook(): UseAudiobookReturn {
 
     src.onended = () => {
       if (!isPlayingRef.current) return;
-      // 自然播完整本书
       isPlayingRef.current = false;
       stopRaf();
       setPlayState("ready");
@@ -158,7 +156,6 @@ export function useAudiobook(): UseAudiobookReturn {
     isPlayingRef.current = true;
     setPlayState("playing");
 
-    // 立刻更新章节显示
     const chIdx = secToChapter(from);
     const chapter = metaRef.current?.chapters[chIdx];
     chapterIndexRef.current = chIdx;
@@ -167,15 +164,6 @@ export function useAudiobook(): UseAudiobookReturn {
 
     rafRef.current = requestAnimationFrame(tick);
   }, [stopSource, stopRaf, tick, secToChapter]);
-
-  // jumpRef 始终指向最新的 startPlayback + buffer
-  // 用于在 openBook 后由外部调用跳转
-  const bufferRef = useRef<AudioBuffer | null>(null);
-  useEffect(() => {
-    jumpRef.current = (globalSec: number) => {
-      if (bufferRef.current) startPlayback(bufferRef.current, globalSec);
-    };
-  }, [startPlayback]);
 
   // ── 进度自动保存 ──────────────────────────────────────────────────────────
 
@@ -190,6 +178,12 @@ export function useAudiobook(): UseAudiobookReturn {
     }, SAVE_INTERVAL_MS);
   }, [stopSaveTimer, globalPos, secToChapter]);
 
+  // ── 加载最近书单（初始化时） ──────────────────────────────────────────────
+
+  useEffect(() => {
+    getRecentAudiobooks().then(setRecentBooks).catch(() => {});
+  }, []);
+
   // ── 公开 API ──────────────────────────────────────────────────────────────
 
   const openBook = useCallback(async (path: string) => {
@@ -197,7 +191,7 @@ export function useAudiobook(): UseAudiobookReturn {
     stopRaf();
     stopSaveTimer();
     isPlayingRef.current = false;
-    bookCache.delete(path); // 强制重新加载
+    bookCache.delete(path);
     setPlayState("loading");
     setCurrentTime(0);
     setCurrentChapterIndex(0);
@@ -214,7 +208,12 @@ export function useAudiobook(): UseAudiobookReturn {
       setBookPath(path);
       setMeta(bookMeta);
 
-      // 恢复进度：章节 startSec + 章节内偏移
+      // 记录最近打开，同时刷新列表
+      pushRecentAudiobook(path, bookMeta.title, bookMeta.author)
+        .then(() => getRecentAudiobooks())
+        .then(setRecentBooks)
+        .catch(() => {});
+
       const chIdx = Math.min(progress.chapterIndex, bookMeta.chapters.length - 1);
       const globalSec = (bookMeta.chapters[chIdx]?.startSec ?? 0) + progress.positionSec;
 
@@ -223,7 +222,7 @@ export function useAudiobook(): UseAudiobookReturn {
       offsetRef.current = globalSec;
       setCurrentTime(progress.positionSec);
 
-      setPlayState("loading"); // 显示解码进度
+      setPlayState("loading");
       const buffer = await decodeBook(path);
       bufferRef.current = buffer;
       setPlayState("ready");
@@ -293,7 +292,6 @@ export function useAudiobook(): UseAudiobookReturn {
   }, [goToChapter, seekInChapter]);
 
   const setSpeed = useCallback((s: Speed) => {
-    // 先冻结当前全局位置，再换速率重新调度
     const pos = globalPos();
     offsetRef.current = pos;
     speedRef.current = s;
@@ -312,6 +310,7 @@ export function useAudiobook(): UseAudiobookReturn {
   return {
     meta, bookPath, playState,
     currentChapter, currentChapterIndex, currentTime, speed,
+    recentBooks,
     openBook, play, pause, seekInChapter,
     goToChapter, nextChapter, prevChapter, setSpeed,
   };

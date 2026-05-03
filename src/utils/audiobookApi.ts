@@ -20,6 +20,13 @@ export interface BookProgress {
   positionSec: number;
 }
 
+export interface RecentBook {
+  path: string;
+  title: string;
+  author: string;
+  lastOpened: number; // Unix timestamp (seconds)
+}
+
 export async function loadAudiobook(path: string): Promise<AudiobookMeta> {
   return invoke<AudiobookMeta>("load_audiobook", { path });
 }
@@ -34,6 +41,18 @@ export async function saveAudiobookProgress(
   positionSec: number,
 ): Promise<void> {
   return invoke("save_audiobook_progress", { bookPath, chapterIndex, positionSec });
+}
+
+export async function getRecentAudiobooks(): Promise<RecentBook[]> {
+  return invoke<RecentBook[]>("get_recent_audiobooks");
+}
+
+export async function pushRecentAudiobook(
+  bookPath: string,
+  title: string,
+  author: string,
+): Promise<void> {
+  return invoke("push_recent_audiobook", { bookPath, title, author });
 }
 
 export function toAssetUrl(path: string): string {

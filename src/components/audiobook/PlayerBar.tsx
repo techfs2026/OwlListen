@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useCallback } from "react";
 import { C, FONT } from "@/styles";
 import { PlayBtn } from "@/components/shared/Primitives";
 import type { Speed } from "@/hooks/useAudiobook";
@@ -19,7 +19,6 @@ interface PlayerBarProps {
   onNext: () => void;
   onSeek: (sec: number) => void;
   onSpeedChange: (s: Speed) => void;
-  onOpenBook: () => void;
 }
 
 function fmtTime(sec: number): string {
@@ -33,42 +32,77 @@ function fmtTime(sec: number): string {
 export function PlayerBar({
   playState, currentChapter, currentChapterIndex, totalChapters,
   currentTime, speed,
-  onPlay, onPause, onPrev, onNext, onSeek, onSpeedChange, onOpenBook,
+  onPlay, onPause, onPrev, onNext, onSeek, onSpeedChange,
 }: PlayerBarProps) {
   const isPlaying = playState === "playing";
   const isReady = playState === "ready" || playState === "playing" || playState === "paused";
   const chDur = currentChapter ? currentChapter.endSec - currentChapter.startSec : 0;
   const progress = chDur > 0 ? currentTime / chDur : 0;
 
-  const handleSeekClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!isReady || chDur <= 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    onSeek(Math.max(0, ratio * chDur));
-  };
+  // ── 拖拽 seek ──────────────────────────────────────────────────────────────
+  const trackRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+
+  const seekFromEvent = useCallback((clientX: number) => {
+    if (!isReady || chDur <= 0 || !trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    onSeek(ratio * chDur);
+  }, [isReady, chDur, onSeek]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (!isReady) return;
+    isDragging.current = true;
+    seekFromEvent(e.clientX);
+
+    const onMove = (ev: MouseEvent) => {
+      if (isDragging.current) seekFromEvent(ev.clientX);
+    };
+    const onUp = () => {
+      isDragging.current = false;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [isReady, seekFromEvent]);
 
   return (
     <div style={s.bar}>
-      {/* 章节进度条（可点击）*/}
-      <div style={s.progressArea} onClick={handleSeekClick}>
-        <div style={s.progressTrack}>
-          <div style={{ ...s.progressFill, width: `${progress * 100}%` }} />
-          {isReady && (
-            <div style={{ ...s.progressThumb, left: `${progress * 100}%` }} />
-          )}
+      {/* 进度条 + 时间码合并一行 */}
+      <div style={s.seekRow}>
+        {/* 时间：已播放 */}
+        <span style={s.timeCode}>
+          {isReady ? fmtTime(currentTime) : "--:--"}
+        </span>
+
+        {/* 进度条 */}
+        <div
+          ref={trackRef}
+          style={s.progressArea}
+          onMouseDown={handleMouseDown}
+        >
+          <div style={s.progressTrack}>
+            <div style={{ ...s.progressFill, width: `${progress * 100}%` }} />
+            {isReady && (
+              <div style={{ ...s.progressThumb, left: `${progress * 100}%` }} />
+            )}
+          </div>
         </div>
+
+        {/* 时间：总时长 */}
+        <span style={{ ...s.timeCode, color: C.ink3 }}>
+          {isReady ? fmtTime(chDur) : "--:--"}
+        </span>
       </div>
 
       {/* 控制行 */}
       <div style={s.controls}>
-        {/* 左：打开书 */}
-        <div style={s.leftZone}>
-          <button style={s.openBtn} onClick={onOpenBook}>打开有声书</button>
-        </div>
+        {/* 左：空占位 */}
+        <div style={s.leftZone} />
 
         {/* 中：播放控制 */}
         <div style={s.centerZone}>
-          {/* 上一章 */}
           <button
             style={{ ...s.skipBtn, opacity: currentChapterIndex <= 0 ? 0.3 : 1 }}
             disabled={!isReady || currentChapterIndex <= 0}
@@ -84,7 +118,6 @@ export function PlayerBar({
             onClick={isPlaying ? onPause : onPlay}
           />
 
-          {/* 下一章 */}
           <button
             style={{ ...s.skipBtn, opacity: currentChapterIndex >= totalChapters - 1 ? 0.3 : 1 }}
             disabled={!isReady || currentChapterIndex >= totalChapters - 1}
@@ -94,16 +127,8 @@ export function PlayerBar({
           </button>
         </div>
 
-        {/* 右：时间 + 速率 */}
+        {/* 右：速率 */}
         <div style={s.rightZone}>
-          {isReady && (
-            <span style={s.timeCode}>
-              {fmtTime(currentTime)}
-              <span style={s.timeSep}>/</span>
-              {fmtTime(chDur)}
-            </span>
-          )}
-          {/* 速率选择 */}
           <div style={s.speeds}>
             {SPEEDS.map((s_) => (
               <button
@@ -122,14 +147,6 @@ export function PlayerBar({
           </div>
         </div>
       </div>
-
-      {/* 章节名 */}
-      {currentChapter && (
-        <div style={s.chapterName}>
-          <span style={s.chapterIdx}>第 {currentChapterIndex + 1} 章</span>
-          <span style={s.chapterTitle}>{currentChapter.title}</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -158,9 +175,17 @@ const s: Record<string, React.CSSProperties> = {
     borderTop: `0.5px solid ${C.border}`,
     flexShrink: 0,
     userSelect: "none",
+    paddingBottom: 8,
+  },
+  // 进度条 + 时间码同行
+  seekRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 16px 4px",
   },
   progressArea: {
-    padding: "0 0 0",
+    flex: 1,
     cursor: "pointer",
     height: 20,
     display: "flex",
@@ -171,10 +196,14 @@ const s: Record<string, React.CSSProperties> = {
     height: 3,
     background: C.paper2,
     position: "relative",
+    cursor: "pointer",
+    borderRadius: 2,
   },
   progressFill: {
     height: "100%",
     background: `linear-gradient(90deg, ${C.blue}, #60A5FA)`,
+    pointerEvents: "none",
+    borderRadius: 2,
   },
   progressThumb: {
     position: "absolute",
@@ -185,17 +214,15 @@ const s: Record<string, React.CSSProperties> = {
     borderRadius: "50%",
     background: C.blue,
     boxShadow: "0 0 0 2px white",
+    pointerEvents: "none",
   },
   controls: {
     display: "flex",
     alignItems: "center",
-    padding: "4px 20px 6px",
-    gap: 0,
+    padding: "0 16px",
   },
   leftZone: {
     flex: 1,
-    display: "flex",
-    alignItems: "center",
   },
   centerZone: {
     display: "flex",
@@ -207,18 +234,6 @@ const s: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: 12,
-  },
-  openBtn: {
-    fontFamily: FONT.sans,
-    fontSize: 12,
-    fontWeight: 500,
-    background: C.blue,
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    padding: "5px 13px",
-    cursor: "pointer",
   },
   skipBtn: {
     background: "none",
@@ -233,11 +248,12 @@ const s: Record<string, React.CSSProperties> = {
   },
   timeCode: {
     fontFamily: FONT.mono,
-    fontSize: 12,
+    fontSize: 11,
     color: C.ink2,
     letterSpacing: "-0.02em",
+    flexShrink: 0,
+    minWidth: 36,
   },
-  timeSep: { color: C.ink3, margin: "0 3px" },
   speeds: {
     display: "flex",
     gap: 2,
@@ -254,28 +270,6 @@ const s: Record<string, React.CSSProperties> = {
     padding: "3px 6px",
     cursor: "pointer",
     transition: "background 0.12s",
-    whiteSpace: "nowrap" as const,
-  },
-  chapterName: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "0 20px 10px",
-  },
-  chapterIdx: {
-    fontFamily: FONT.mono,
-    fontSize: 10,
-    color: C.blue,
-    background: C.blueLt,
-    padding: "1px 7px",
-    borderRadius: 4,
-    flexShrink: 0,
-  },
-  chapterTitle: {
-    fontSize: 12,
-    color: C.ink3,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
     whiteSpace: "nowrap" as const,
   },
 };
