@@ -14,9 +14,8 @@ export function HomeScreen({ onSelect }: HomeScreenProps) {
       <div style={s.texture} />
       <div style={s.content}>
         <div style={s.logoWrap}>
-          <div style={s.logoEyebrow}>Waveform Studio</div>
-          <h1 style={s.logoTitle}>音频工作台</h1>
-          <p style={s.logoSub}>标注音频素材，精听练习，或打开有声书</p>
+          <div style={s.logoEyebrow}>a listening practice platform</div>
+          <h1 style={s.logoTitle}>LangListen</h1>
         </div>
 
         <div style={s.cards}>
@@ -25,28 +24,26 @@ export function HomeScreen({ onSelect }: HomeScreenProps) {
             title="音频标注"
             desc="打开音频文件，在波形上划定片段、填写备注，导出携带 Whisper 转写文本的 ZIP 数据包。"
             accentColor={C.blue}
-            features={["波形可视化标注", "片段备注", "Whisper 自动转写", "导出 ZIP 数据包"]}
+            features={["波形可视化标注", "片段备注", "Whisper 转写", "导出 ZIP 数据包"]}
             onClick={() => onSelect("annotate")}
           />
           <ModeCard
             badge={<Badge color="green">练习模式</Badge>}
             title="精听练习"
-            desc="导入数据包，逐片段反复听写，Diff 对照原文查漏补缺，随时标记需要重听的片段。"
+            desc="导入 ZIP 数据包，逐片段反复听写，Diff 对照原文查漏补缺，随时标记需要重听的片段。"
             accentColor={C.green}
-            features={["逐片段听写", "原文 Diff 对照", "标记重听", "随到随练"]}
+            features={["逐片段听写", "原文 Diff 对照", "标记重听", "全键盘操作"]}
             onClick={() => onSelect("listen")}
           />
           <ModeCard
-            badge={<Badge color="blue">有声书</Badge>}
+            badge={<Badge color="blue">有声书模式</Badge>}
             title="听有声书"
             desc="打开 M4B 有声书，自动解析章节，支持变速播放，进度自动保存。"
             accentColor="#F97316"
-            features={["自动解析章节", "0.5×～1.75× 变速", "进度自动记忆", "支持 M4B / M4A"]}
+            features={["自动解析章节", "0.5×～1.75× 变速", "进度自动记忆", "支持 M4B"]}
             onClick={() => onSelect("audiobook")}
           />
         </div>
-
-        <p style={s.footer}>拖拽音频文件到「音频标注」即可快速开始</p>
       </div>
     </div>
   );

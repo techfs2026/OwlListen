@@ -4,9 +4,9 @@ const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] 
   {
     group: "播放",
     items: [
-      { key: "Space", label: "播放 / 暂停" },
-      { key: "[", label: "上一章节" },
-      { key: "]", label: "下一章节" },
+      { key: "P", label: "播放 / 暂停" },
+      { key: "J", label: "上一章节" },
+      { key: "L", label: "下一章节" },
     ],
   },
   {

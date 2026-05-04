@@ -36,8 +36,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   // hook 数据来了就同步覆盖（包括删到 0 的情况，所以不要 length > 0 守卫）
   useEffect(() => { setLocalRecent(recentBooks); }, [recentBooks]);
 
-  // ── 打开 / 拖入 ────────────────────────────────────────────────────────────
-
   const openBookWithCover = useCallback(async (path: string) => {
     setCover(null);
     try {
@@ -53,8 +51,7 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     const path = await open({
       multiple: false,
       filters: [
-        { name: "有声书", extensions: ["m4b", "m4a", "mp3", "aac"] },
-        { name: "全部文件", extensions: ["*"] },
+        { name: "有声书", extensions: ["m4b"] },
       ],
     });
     if (typeof path === "string") {
@@ -67,7 +64,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   }, [openBookWithCover]);
 
   const handleRemoveRecent = useCallback(async (book: RecentBook) => {
-    // 乐观更新
     setLocalRecent((list) => list.filter((b) => b.path !== book.path));
     try {
       await removeRecentAudiobook(book.path);
@@ -78,7 +74,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     }
   }, []);
 
-  // ── Tauri 原生拖拽（拿到真实文件路径）─────────────────────────────────
   useEffect(() => {
     let unlisten: (() => void) | undefined;
 
@@ -89,7 +84,7 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
           if (!paths || paths.length === 0) return;
           const path = paths[0];
           // 简单后缀过滤，避免拖入图片/文档
-          if (!/\.(m4b|m4a|mp3|aac)$/i.test(path)) return;
+          if (!/\.(m4b)$/i.test(path)) return;
 
           openBookWithCover(path);
         }
@@ -100,21 +95,24 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     return () => { unlisten?.(); };
   }, [openBook]);
 
-  // ── 快捷键 ────────────────────────────────────────────────────────────────
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
       switch (e.key) {
-        case " ":
-          e.preventDefault();
-          if (playState === "playing") pause();
-          else if (playState === "ready" || playState === "paused") play();
-          break;
-        case "[": e.preventDefault(); prevChapter(); break;
-        case "]": e.preventDefault(); nextChapter(); break;
+        case "p":
+        case "P":
+          {
+            e.preventDefault();
+            if (playState === "playing") pause();
+            else if (playState === "ready" || playState === "paused") play();
+            break;
+          }
+        case "j":
+        case "J": e.preventDefault(); prevChapter(); break;
+        case "l":
+        case "L": e.preventDefault(); nextChapter(); break;
         case "h":
         case "H": e.preventDefault(); setShowHelp((v) => !v); break;
         case "Escape": e.preventDefault(); if (showHelp) setShowHelp(false); break;
@@ -139,7 +137,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     <div
       className="audiobook"
     >
-      {/* ── 顶部工具栏 ─────────────────────────────────────────────────── */}
       <div className="audiobook__toolbar">
         <button className="btn btn--ghost btn--sm" onClick={onBack}>← 返回</button>
         <span className="audiobook__mode-tag">有声书</span>
@@ -178,7 +175,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
         </button>
       </div>
 
-      {/* ── 主体 ──────────────────────────────────────────────────────── */}
       <div className="audiobook__body">
         {meta ? (
           <>

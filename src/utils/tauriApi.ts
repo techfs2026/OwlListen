@@ -8,7 +8,6 @@ import type {
 
 /** 加载音频文件,返回元信息 */
 export async function loadAudio(path: string): Promise<AudioInfo> {
-  // Rust 端用 #[serde(rename_all = "camelCase")] 已经统一为 camelCase
   return await invoke<AudioInfo>("load_audio", { path });
 }
 
@@ -46,8 +45,6 @@ export async function loadLabels(path: string): Promise<Label[]> {
     text: r.text ?? `段落 ${i + 1}`,
   }));
 }
-
-// ── 导出数据包 ────────────────────────────────────────────────────────────────
 
 export interface ExportOptions {
   /** 源音频文件路径 */

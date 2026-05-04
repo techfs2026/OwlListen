@@ -39,9 +39,6 @@ export interface UseAudiobookReturn {
   setSpeed: (s: Speed) => void;
 }
 
-// ── 单例 <audio> 元素 ──────────────────────────────────────────────────────────
-// 不挂到 DOM 也能播放。所有书共用一个，避免多个并发播放。
-
 let globalAudio: HTMLAudioElement | null = null;
 function getAudio(): HTMLAudioElement {
   if (!globalAudio) {
@@ -107,8 +104,6 @@ function evictOtherBooks(currentBookPath: string) {
   }
 }
 
-// ── 从 Rust 加载单章并生成 Blob URL ─────────────────────────────────────────
-
 async function loadChapterEntry(
   bookPath: string,
   chapter: Chapter,
@@ -134,8 +129,6 @@ async function loadChapterEntry(
   return { url, duration, lastUsed: Date.now() };
 }
 
-// ── Hook ─────────────────────────────────────────────────────────────────────
-
 export function useAudiobook(): UseAudiobookReturn {
   const [meta, setMeta] = useState<AudiobookMeta | null>(null);
   const [bookPath, setBookPath] = useState("");
@@ -145,7 +138,6 @@ export function useAudiobook(): UseAudiobookReturn {
   const [speed, setSpeedState] = useState<Speed>(1);
   const [recentBooks, setRecentBooks] = useState<RecentBook[]>([]);
 
-  // refs
   const bookPathRef = useRef("");
   const metaRef = useRef<AudiobookMeta | null>(null);
   const chapterIndexRef = useRef(0);
@@ -156,8 +148,6 @@ export function useAudiobook(): UseAudiobookReturn {
   const lastSavedAtRef = useRef(0);
   /** 是否正在 seek（避免 timeupdate 反复触发保存）*/
   const seekingRef = useRef(false);
-
-  // ── 核心：绑定 <audio> 事件 ────────────────────────────────────────────────
 
   useEffect(() => {
     const audio = getAudio();
@@ -175,7 +165,7 @@ export function useAudiobook(): UseAudiobookReturn {
           bookPathRef.current,
           chapterIndexRef.current,
           audio.currentTime,
-        ).catch(() => {});
+        ).catch(() => { });
       }
     };
 
@@ -185,7 +175,7 @@ export function useAudiobook(): UseAudiobookReturn {
       setCurrentTime(0);
       audio.currentTime = 0;
       saveAudiobookProgress(bookPathRef.current, chapterIndexRef.current, 0)
-        .catch(() => {});
+        .catch(() => { });
     };
 
     const onPlay = () => setPlayState("playing");
@@ -214,8 +204,6 @@ export function useAudiobook(): UseAudiobookReturn {
     };
   }, []);
 
-  // ── 装载某章节（设置 audio.src 并定位到 fromSec），不立刻 play ─────────────
-
   const loadIntoAudioElement = useCallback(
     (entry: CacheEntry, fromSec: number) => {
       const audio = getAudio();
@@ -235,8 +223,6 @@ export function useAudiobook(): UseAudiobookReturn {
     [],
   );
 
-  // ── 预加载相邻章节（仅下一章，prev 不主动预取）────────────────────────────
-
   const prefetchAdjacent = useCallback((idx: number) => {
     const chapters = metaRef.current?.chapters;
     if (!chapters) return;
@@ -244,17 +230,13 @@ export function useAudiobook(): UseAudiobookReturn {
     const next = idx + 1;
     if (next < chapters.length && !getCached(path, next)) {
       // 后台静默：失败不影响主流程
-      loadChapterEntry(path, chapters[next], next).catch(() => {});
+      loadChapterEntry(path, chapters[next], next).catch(() => { });
     }
   }, []);
 
-  // ── 初始化：拉最近书单 ───────────────────────────────────────────────────
-
   useEffect(() => {
-    getRecentAudiobooks().then(setRecentBooks).catch(() => {});
+    getRecentAudiobooks().then(setRecentBooks).catch(() => { });
   }, []);
-
-  // ── openBook ─────────────────────────────────────────────────────────────
 
   const openBook = useCallback(async (path: string) => {
     const audio = getAudio();
@@ -280,7 +262,7 @@ export function useAudiobook(): UseAudiobookReturn {
       pushRecentAudiobook(path, bookMeta.title, bookMeta.author)
         .then(() => getRecentAudiobooks())
         .then(setRecentBooks)
-        .catch(() => {});
+        .catch(() => { });
 
       const chIdx = Math.min(progress.chapterIndex, bookMeta.chapters.length - 1);
       const posSec = progress.positionSec;
@@ -298,8 +280,6 @@ export function useAudiobook(): UseAudiobookReturn {
       setPlayState("idle");
     }
   }, [loadIntoAudioElement, prefetchAdjacent]);
-
-  // ── 播放控制 ─────────────────────────────────────────────────────────────
 
   const play = useCallback(() => {
     const audio = getAudio();
@@ -321,7 +301,7 @@ export function useAudiobook(): UseAudiobookReturn {
       bookPathRef.current,
       chapterIndexRef.current,
       audio.currentTime,
-    ).catch(() => {});
+    ).catch(() => { });
   }, []);
 
   const seekInChapter = useCallback((sec: number) => {
@@ -333,8 +313,6 @@ export function useAudiobook(): UseAudiobookReturn {
     // 让浏览器处理完 seek，再恢复 timeupdate 同步
     requestAnimationFrame(() => { seekingRef.current = false; });
   }, []);
-
-  // ── 章节跳转 ─────────────────────────────────────────────────────────────
 
   const goToChapter = useCallback(async (index: number, positionSec = 0) => {
     const curMeta = metaRef.current;
@@ -393,8 +371,6 @@ export function useAudiobook(): UseAudiobookReturn {
     }
   }, [goToChapter, seekInChapter]);
 
-  // ── 变速 ─────────────────────────────────────────────────────────────────
-
   const setSpeed = useCallback((s: Speed) => {
     speedRef.current = s;
     setSpeedState(s);
@@ -402,8 +378,6 @@ export function useAudiobook(): UseAudiobookReturn {
     audio.playbackRate = s;
     audio.preservesPitch = true; // 保险：某些浏览器在 src 切换后会重置
   }, []);
-
-  // ── cleanup ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     return () => {

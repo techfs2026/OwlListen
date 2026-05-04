@@ -1,5 +1,3 @@
-// ── 来自 Rust 的数据 ──────────────────────────────────────────────────────────
-
 export interface AudioInfo {
   duration: number;
   sampleRate: number;
@@ -13,8 +11,6 @@ export interface LabelData {
   end: number;
   text: string;
 }
-
-// ── 渲染数据(从 Rust 命令返回)─────────────────────────────────────────────
 
 export type RenderMode = "envelope" | "polyline" | "stem";
 
@@ -38,8 +34,6 @@ export interface RenderData {
   pixelWidth: number;
 }
 
-// ── 前端状态 ──────────────────────────────────────────────────────────────────
-
 export interface Label {
   id: string;
   start: number;
@@ -53,8 +47,6 @@ export interface ViewRange {
 }
 
 export type LoadingState = "idle" | "decoding" | "building" | "ready" | "error";
-
-// ── 渲染配置 ──────────────────────────────────────────────────────────────────
 
 export interface WaveformColors {
   /** 包络外层(min/max,浅色)*/
@@ -85,16 +77,12 @@ export const DEFAULT_COLORS: WaveformColors = {
   channelDivider: "#1F2937",   // 立体声分隔线
 };
 
-// ── WebGL 内部类型 ────────────────────────────────────────────────────────────
-
 export interface GlResources {
   gl: WebGL2RenderingContext;
   program: WebGLProgram;
   vao: WebGLVertexArrayObject;
   vbo: WebGLBuffer;
 }
-
-// ── 精听模式类型 ──────────────────────────────────────────────────────────────
 
 export interface ListenSegment {
   index: number;

@@ -23,7 +23,7 @@ export function EmptyState({
     <div className="empty-state">
       <div className="empty-state__icon">📖</div>
       <p className="empty-state__title">还没有打开有声书</p>
-      <p className="empty-state__hint">支持 M4B · M4A · MP3 · AAC</p>
+      <p className="empty-state__hint">支持 M4B</p>
       <button className="btn btn--primary btn--lg empty-state__cta" onClick={onOpen}>
         选择文件
       </button>
@@ -56,9 +56,8 @@ export function EmptyState({
                   </div>
                 </button>
                 <button
-                  className={`recent-card__remove${
-                    hoverPath === book.path ? " recent-card__remove--visible" : ""
-                  }`}
+                  className={`recent-card__remove${hoverPath === book.path ? " recent-card__remove--visible" : ""
+                    }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     onRemoveRecent(book);
