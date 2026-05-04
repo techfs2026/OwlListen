@@ -1,0 +1,271 @@
+@use "@/styles/mixins" as *;
+
+// ──────────────────────────────────────────────────────────────────────────
+//  练习面板 - PracticePanel
+// ──────────────────────────────────────────────────────────────────────────
+
+.practice {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 36px 56px;
+  gap: 28px;
+  overflow-y: auto;
+  outline: none;
+  @include scrollbar-thin;
+
+  // 空片段占位
+  &--empty {
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__empty-hint {
+    color: var(--color-ink-3);
+    font-size: var(--font-size-md);
+  }
+
+  // ── 片段信息行 ────────────────────────────────────────────────────────
+  &__seg-info {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+
+  &__seg-num {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xl);
+    color: var(--color-brand);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  &__seg-label {
+    font-size: var(--font-size-md);
+    color: var(--color-ink-2);
+    background: var(--color-paper-2);
+    border: 0.5px solid var(--color-border-2);
+    border-radius: var(--radius-md);
+    padding: 4px var(--space-3);
+  }
+
+  &__seg-dur {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-base);
+    color: var(--color-ink-3);
+  }
+
+  &__seg-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  // ── 通用 section ──────────────────────────────────────────────────────
+  &__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    flex-shrink: 0;
+  }
+
+  &__section-label {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  &__ref-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  // ── 状态徽章 ──────────────────────────────────────────────────────────
+  &__badge {
+    font-size: var(--font-size-sm);
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+    border-radius: var(--radius-sm);
+    padding: 2px var(--space-2);
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+
+    &--focus {
+      color: var(--color-brand);
+      background: var(--color-brand-soft);
+    }
+
+    &--speech {
+      color: var(--color-danger);
+      background: var(--color-danger-soft);
+    }
+
+    &--transcribing {
+      color: var(--color-brand);
+      background: var(--color-brand-soft);
+    }
+  }
+
+  &__speech-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background: var(--color-danger);
+    display: inline-block;
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  &__speech-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--color-brand-soft);
+    border-top-color: var(--color-brand);
+    border-radius: var(--radius-full);
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+
+  // ── 语音按钮行 ────────────────────────────────────────────────────────
+  &__speech-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  &__speech-btn {
+    @include button-reset;
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-sans);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    border: 0.5px solid var(--color-border-2);
+    border-radius: var(--radius-md);
+    padding: 5px var(--space-3);
+    background: var(--color-paper);
+    color: var(--color-ink-2);
+    transition:
+      background var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+    flex-shrink: 0;
+
+    svg {
+      margin-right: 5px;
+      flex-shrink: 0;
+    }
+
+    &:hover:not(:disabled) {
+      background: var(--color-paper-2);
+      border-color: var(--color-ink-3);
+    }
+
+    &--active {
+      background: rgba(192, 57, 43, 0.08);
+      border-color: rgba(192, 57, 43, 0.4);
+      color: var(--color-danger);
+
+      &:hover:not(:disabled) {
+        background: rgba(192, 57, 43, 0.13);
+      }
+    }
+
+    &--disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      background: var(--color-paper-2);
+    }
+  }
+
+  &__interim-hint {
+    font-size: var(--font-size-base);
+    color: var(--color-ink-3);
+    font-style: italic;
+    flex: 1;
+    min-width: 0;
+    @include text-ellipsis;
+  }
+
+  // ── 听写 textarea ─────────────────────────────────────────────────────
+  &__textarea {
+    width: 100%;
+    border: 0.5px solid var(--color-border-2);
+    border-radius: var(--radius-lg);
+    padding: 18px 22px;
+    font-family: var(--font-sans);
+    font-size: 18px;
+    color: var(--color-ink-1);
+    background: var(--color-paper);
+    outline: none;
+    line-height: 1.9;
+    resize: none;
+    box-sizing: border-box;
+    transition:
+      border-color var(--duration-fast) var(--ease-out),
+      box-shadow var(--duration-fast) var(--ease-out);
+
+    &::placeholder {
+      color: var(--color-ink-3);
+    }
+
+    &--focused {
+      border-color: var(--color-brand-mid);
+      box-shadow: 0 0 0 2px var(--color-brand-soft);
+    }
+
+    &--listening {
+      border-color: var(--color-danger);
+      box-shadow: 0 0 0 2px var(--color-danger-soft);
+    }
+
+    &--transcribing {
+      border-color: var(--color-brand-mid);
+      box-shadow: 0 0 0 2px var(--color-brand-soft);
+    }
+  }
+
+  // ── 原文展示 ──────────────────────────────────────────────────────────
+  &__ref-text {
+    background: var(--color-paper-2);
+    border: 0.5px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 18px 22px;
+    font-size: 18px;
+    color: var(--color-ink-1);
+    line-height: 1.9;
+    font-family: var(--font-sans);
+  }
+
+  // ── 底部操作栏 ────────────────────────────────────────────────────────
+  &__controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    flex-shrink: 0;
+    margin-top: auto;
+    padding-top: var(--space-2);
+  }
+
+  &__controls-spacer {
+    flex: 1;
+  }
+}
+
+// ── pulse 动画（语音录音指示点）──────────────────────────────────────────
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}

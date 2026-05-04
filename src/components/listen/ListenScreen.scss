@@ -1,0 +1,213 @@
+@use "@/styles/mixins" as *;
+
+// ──────────────────────────────────────────────────────────────────────────
+//  精听练习 - ListenScreen
+// ──────────────────────────────────────────────────────────────────────────
+
+.listen {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background: var(--color-paper-2);
+  overflow: hidden;
+  user-select: none;
+
+  // ── 顶栏 ──────────────────────────────────────────────────────────────
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-4);
+    height: 48px;
+    background: var(--color-paper);
+    border-bottom: 0.5px solid var(--color-border);
+    flex-shrink: 0;
+    box-shadow: var(--shadow-sm);
+    z-index: var(--z-toolbar);
+  }
+
+  &__mode-tag {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-success);
+    padding: 3px var(--space-2);
+    background: var(--color-success-soft);
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+
+  &__toolbar-spacer {
+    flex: 1;
+  }
+
+  // label 直接渲染为 primary sm 按钮，避免内层 Btn 需要 pointerEvents:none 导致 hover 失效
+  &__import-btn {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-sans);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+    line-height: 1.4;
+    padding: 5px var(--space-3);
+    min-height: 28px;
+    border-radius: var(--radius-md);
+    background: var(--color-brand);
+    color: #fff;
+    border: 0.5px solid var(--color-brand);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background var(--duration-fast) var(--ease-out),
+      border-color var(--duration-fast) var(--ease-out);
+
+    &:hover { background: var(--color-brand-hover); border-color: var(--color-brand-hover); }
+    &:active { transform: translateY(1px); }
+
+    input[type="file"] { display: none; }
+  }
+
+  &__progress {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+    flex-shrink: 0;
+  }
+
+  // ── 主体 ──────────────────────────────────────────────────────────────
+  &__body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    background: var(--color-paper);
+  }
+
+  // ── 空状态 ────────────────────────────────────────────────────────────
+  &__empty {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  &__empty-texture {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--color-border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  &__empty-content {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+    animation: fadeIn var(--duration-slow) var(--ease-out) both;
+  }
+
+  &__drop-box {
+    background: var(--color-paper);
+    border: 1.5px dashed var(--color-border-2);
+    border-radius: var(--radius-xl);
+    padding: 36px 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+    box-shadow: var(--shadow-md);
+    transition: border-color var(--duration-base) var(--ease-out);
+
+    &:hover {
+      border-color: var(--color-ink-3);
+    }
+  }
+
+  &__drop-icon {
+    font-size: 40px;
+    line-height: 1;
+    margin-bottom: var(--space-1);
+  }
+
+  &__drop-title {
+    font-size: var(--font-size-lg);
+    font-weight: 500;
+    color: var(--color-ink-1);
+    margin: 0;
+  }
+
+  &__drop-hint {
+    font-size: var(--font-size-base);
+    color: var(--color-ink-3);
+    margin: 0;
+  }
+
+  &__empty-note {
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+    font-family: var(--font-mono);
+    text-align: center;
+    max-width: 380px;
+    line-height: var(--line-height-relax);
+    margin: 0;
+  }
+
+  // ── 加载态 ────────────────────────────────────────────────────────────
+  &__loading {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  &__loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--color-border);
+    border-top-color: var(--color-brand);
+    border-radius: var(--radius-full);
+    animation: spin 0.8s linear infinite;
+  }
+
+  &__loading-text {
+    font-size: var(--font-size-base);
+    color: var(--color-ink-3);
+    margin: 0;
+  }
+
+  // ── 错误态 ────────────────────────────────────────────────────────────
+  &__error {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  &__error-title {
+    font-size: var(--font-size-md);
+    color: var(--color-danger);
+    font-weight: 500;
+    margin: 0;
+  }
+
+  &__error-msg {
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+    font-family: var(--font-mono);
+    max-width: 400px;
+    text-align: center;
+    margin: 0;
+  }
+}

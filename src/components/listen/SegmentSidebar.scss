@@ -1,0 +1,130 @@
+@use "@/styles/mixins" as *;
+
+// ──────────────────────────────────────────────────────────────────────────
+//  片段侧边栏 - SegmentSidebar
+// ──────────────────────────────────────────────────────────────────────────
+
+.seg-sidebar {
+  width: 264px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 0.5px solid var(--color-border);
+  background: var(--color-paper-2);
+  overflow: hidden;
+
+  // ── 头部标题 ──────────────────────────────────────────────────────────
+  &__head {
+    padding: var(--space-4) 20px var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+    flex-shrink: 0;
+  }
+
+  // ── 列表区（可滚动）──────────────────────────────────────────────────
+  &__list {
+    flex: 1;
+    overflow-y: auto;
+    @include scrollbar-thin;
+  }
+
+  // ── 图例统计 ──────────────────────────────────────────────────────────
+  &__legend {
+    padding: 14px 20px;
+    border-top: 0.5px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+
+  &__legend-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--font-size-sm);
+    font-family: var(--font-mono);
+    color: var(--color-ink-3);
+  }
+
+  &__legend-count {
+    margin-left: auto;
+    color: var(--color-ink-2);
+  }
+}
+
+// ── 片段列表项 ─────────────────────────────────────────────────────────────
+
+.seg-item {
+  padding: 13px 20px;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  background: transparent;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+
+  &:hover:not(&--active) {
+    background: var(--color-hover-overlay);
+  }
+
+  &--active {
+    background: var(--color-brand-soft);
+    border-left-color: var(--color-brand);
+  }
+
+  &__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-1);
+  }
+
+  &__num {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    color: var(--color-ink-3);
+
+    .seg-item--active & {
+      color: var(--color-brand);
+    }
+  }
+
+  &__dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+
+    &--pending {
+      background: var(--color-border-2);
+      border: 1px solid var(--color-ink-3);
+    }
+
+    &--done {
+      background: var(--color-success);
+    }
+
+    &--flagged {
+      background: var(--color-danger);
+    }
+  }
+
+  &__time {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+  }
+
+  &__label {
+    font-size: var(--font-size-base);
+    color: var(--color-ink-2);
+    margin-top: 3px;
+    @include text-ellipsis;
+  }
+}

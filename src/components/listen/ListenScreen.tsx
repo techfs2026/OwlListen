@@ -1,10 +1,10 @@
 import React, { useCallback } from "react";
-import { C, FONT } from "@/styles";
 import { Btn, TbSep } from "@/components/shared/Primitives";
 import { SegmentSidebar } from "./SegmentSidebar";
 import { PracticePanel } from "./PracticePanel";
 import { usePack } from "@/hooks/usePack";
 import type { SegmentStatus } from "@/types/waveform";
+import "./ListenScreen.scss";
 
 interface ListenScreenProps {
   onBack: () => void;
@@ -53,31 +53,29 @@ export function ListenScreen({ onBack }: ListenScreenProps) {
 
   return (
     <div
-      style={s.root}
+      className="listen"
       onDragOver={(e) => e.preventDefault()}
       onDrop={handleDrop}
     >
       {/* 顶栏 */}
-      <div style={s.topbar}>
+      <div className="listen__toolbar">
         <Btn variant="ghost" size="sm" onClick={onBack} style={{ fontSize: 12, padding: "4px 10px" }}>
           ← 返回
         </Btn>
         <TbSep />
-        <span style={s.modeTag}>精听练习</span>
+        <span className="listen__mode-tag">精听练习</span>
         <TbSep />
 
         {/* 导入按钮 */}
-        <label style={{ cursor: "pointer" }}>
-          <input type="file" accept=".zip" style={{ display: "none" }} onChange={handleFileInput} />
-          <Btn variant="primary" size="sm" style={{ pointerEvents: "none" }}>
-            导入 ZIP
-          </Btn>
+        <label className="listen__import-btn">
+          <input type="file" accept=".zip" onChange={handleFileInput} />
+          导入 ZIP
         </label>
 
-        <div style={{ flex: 1 }} />
+        <div className="listen__toolbar-spacer" />
 
         {meta && (
-          <span style={s.progress}>
+          <span className="listen__progress">
             {doneCount} / {total} 片段已完成
           </span>
         )}
@@ -91,7 +89,7 @@ export function ListenScreen({ onBack }: ListenScreenProps) {
       ) : !meta ? (
         <EmptyState onFileInput={handleFileInput} />
       ) : (
-        <div style={s.body}>
+        <div className="listen__body">
           <SegmentSidebar
             segments={segments}
             segStates={segStates}
@@ -120,22 +118,19 @@ export function ListenScreen({ onBack }: ListenScreenProps) {
 
 function EmptyState({ onFileInput }: { onFileInput: (e: React.ChangeEvent<HTMLInputElement>) => void }) {
   return (
-    <div style={s.empty}>
-      {/* 纸质纹理 */}
-      <div style={s.emptyTexture} />
-      <div style={s.emptyContent}>
-        <div style={s.dropBox}>
-          <div style={s.dropIcon}>📦</div>
-          <p style={s.dropTitle}>拖入 ZIP 数据包</p>
-          <p style={s.dropHint}>或点击下方按钮选择文件</p>
-          <label style={{ marginTop: 12, cursor: "pointer" }}>
-            <input type="file" accept=".zip" style={{ display: "none" }} onChange={onFileInput} />
-            <Btn variant="primary" size="md" style={{ pointerEvents: "none" }}>
-              选择 ZIP 文件
-            </Btn>
+    <div className="listen__empty">
+      <div className="listen__empty-texture" />
+      <div className="listen__empty-content">
+        <div className="listen__drop-box">
+          <div className="listen__drop-icon">📦</div>
+          <p className="listen__drop-title">拖入 ZIP 数据包</p>
+          <p className="listen__drop-hint">或点击下方按钮选择文件</p>
+          <label className="listen__import-btn" style={{ marginTop: 12 }}>
+            <input type="file" accept=".zip" onChange={onFileInput} />
+            选择 ZIP 文件
           </label>
         </div>
-        <p style={s.emptyNote}>
+        <p className="listen__empty-note">
           数据包由「音频标注」模式导出，包含音频片段与 Whisper 转写文本
         </p>
       </div>
@@ -145,114 +140,19 @@ function EmptyState({ onFileInput }: { onFileInput: (e: React.ChangeEvent<HTMLIn
 
 function LoadingState() {
   return (
-    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12 }}>
-      <div style={{ width: 24, height: 24, border: `2px solid ${C.border}`, borderTop: `2px solid ${C.blue}`, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-      <p style={{ fontSize: 13, color: C.ink3 }}>正在解压数据包…</p>
+    <div className="listen__loading">
+      <div className="listen__loading-spinner" />
+      <p className="listen__loading-text">正在解压数据包…</p>
     </div>
   );
 }
 
 function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
-    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 10 }}>
-      <p style={{ fontSize: 14, color: C.red, fontWeight: 500 }}>导入失败</p>
-      <p style={{ fontSize: 12, color: C.ink3, fontFamily: FONT.mono, maxWidth: 400, textAlign: "center" }}>{error}</p>
+    <div className="listen__error">
+      <p className="listen__error-title">导入失败</p>
+      <p className="listen__error-msg">{error}</p>
       <Btn variant="ghost" size="sm" onClick={onRetry}>重试</Btn>
     </div>
   );
 }
-
-// ── 样式 ──────────────────────────────────────────────────────────────────────
-
-const s: Record<string, React.CSSProperties> = {
-  root: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100vw",
-    height: "100vh",
-    background: C.paper2,
-    overflow: "hidden",
-  },
-  topbar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "0 18px",
-    height: 56,
-    background: C.paper,
-    borderBottom: `0.5px solid ${C.border}`,
-    flexShrink: 0,
-    boxShadow: "0 1px 0 rgba(26,39,68,0.04)",
-  },
-  modeTag: {
-    fontFamily: FONT.mono,
-    fontSize: 11,
-    letterSpacing: "0.10em",
-    textTransform: "uppercase" as const,
-    color: C.green,
-    padding: "3px 9px",
-    background: C.greenLt,
-    borderRadius: 4,
-  },
-  progress: {
-    fontFamily: FONT.mono,
-    fontSize: 12,
-    color: C.ink3,
-  },
-  body: {
-    flex: 1,
-    display: "flex",
-    overflow: "hidden",
-    background: C.paper,
-  },
-  empty: {
-    flex: 1,
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-  },
-  emptyTexture: {
-    position: "absolute",
-    inset: 0,
-    backgroundImage: `
-      linear-gradient(${C.border} 1px, transparent 1px),
-      linear-gradient(90deg, ${C.border} 1px, transparent 1px)
-    `,
-    backgroundSize: "40px 40px",
-    opacity: 0.5,
-    pointerEvents: "none",
-  },
-  emptyContent: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 16,
-    animation: "fadeIn 0.3s ease both",
-  },
-  dropBox: {
-    background: C.paper,
-    border: `1.5px dashed ${C.border2}`,
-    borderRadius: 16,
-    padding: "36px 48px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 8,
-    boxShadow: "0 2px 12px rgba(26,39,68,0.06)",
-    transition: "border-color 0.15s",
-  },
-  dropIcon: { fontSize: 40, lineHeight: 1, marginBottom: 4 },
-  dropTitle: { fontSize: 16, fontWeight: 500, color: C.ink },
-  dropHint: { fontSize: 13, color: C.ink3 },
-  emptyNote: {
-    fontSize: 12,
-    color: C.ink3,
-    fontFamily: FONT.mono,
-    textAlign: "center" as const,
-    maxWidth: 380,
-    lineHeight: 1.6,
-  },
-};

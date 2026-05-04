@@ -1,0 +1,143 @@
+@use "@/styles/mixins" as *;
+
+// ──────────────────────────────────────────────────────────────────────────
+//  原文对照视图 - DiffView
+// ──────────────────────────────────────────────────────────────────────────
+
+.diff-view {
+  border: 0.5px solid var(--color-border-2);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  flex-shrink: 0;
+
+  // ── 头部 ──────────────────────────────────────────────────────────────
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 13px;
+    background: var(--color-paper-3);
+    border-bottom: 0.5px solid var(--color-border);
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  &__head-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  &__head-label {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+    margin-right: var(--space-1);
+  }
+
+  &__legend {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+  }
+
+  &__dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-full);
+
+    &--ok      { background: var(--color-success); }
+    &--wrong   { background: var(--color-danger); }
+    &--missing { background: var(--color-warning); }
+  }
+
+  // ── 统计行 ────────────────────────────────────────────────────────────
+  &__score-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  &__accuracy {
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+    font-family: var(--font-mono);
+    margin-left: var(--space-1);
+
+    strong {
+      // color set inline via JS (accuracy-dependent)
+    }
+  }
+
+  // ── Diff 正文 ─────────────────────────────────────────────────────────
+  &__body {
+    padding: var(--space-3) 14px;
+    line-height: 2;
+    font-size: var(--font-size-md);
+    background: var(--color-paper);
+    min-height: 52px;
+    word-break: break-word;
+  }
+
+  &__empty {
+    color: var(--color-ink-3);
+    font-style: italic;
+    font-size: var(--font-size-base);
+  }
+
+  // ── 词标记 ────────────────────────────────────────────────────────────
+  &__word {
+    border-radius: var(--radius-sm);
+    padding: 1px 3px;
+
+    &--ok {
+      color: var(--color-success);
+      background: var(--color-success-soft);
+    }
+
+    &--wrong {
+      color: var(--color-danger);
+      background: var(--color-danger-soft);
+      text-decoration: line-through;
+      text-decoration-color: color-mix(in srgb, var(--color-danger) 53%, transparent);
+    }
+
+    &--missing {
+      color: var(--color-warning);
+      background: var(--color-warning-soft);
+      font-style: italic;
+    }
+  }
+}
+
+// ── 分数 chip ──────────────────────────────────────────────────────────────
+
+.score-chip {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+
+  &--ok {
+    color: var(--color-success);
+    background: var(--color-success-soft);
+  }
+
+  &--wrong {
+    color: var(--color-danger);
+    background: var(--color-danger-soft);
+  }
+
+  &--missing {
+    color: var(--color-warning);
+    background: var(--color-warning-soft);
+  }
+}

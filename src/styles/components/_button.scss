@@ -3,7 +3,7 @@
 // ──────────────────────────────────────────────────────────────────────────
 //  通用按钮
 //  .btn 基础类 + 修饰符
-//  用法: <button class="btn btn--primary">…</button>
+//  用法: <button class="btn btn--primary btn--sm">…</button>
 // ──────────────────────────────────────────────────────────────────────────
 
 .btn {
@@ -13,39 +13,30 @@
   justify-content: center;
   gap: var(--space-2);
   font-family: var(--font-sans);
-  padding: 8px var(--space-4);
-  font-size: var(--font-size-md);
+  padding: 7px var(--space-4);
+  font-size: var(--font-size-base);
   min-height: 32px;
   font-weight: 500;
-  line-height: 1;
+  line-height: 1.4;
   border-radius: var(--radius-md);
   white-space: nowrap;
   transition:
-    background var(--duration-fast) var(--ease-out),
-    color      var(--duration-fast) var(--ease-out),
-    border     var(--duration-fast) var(--ease-out),
-    box-shadow var(--duration-fast) var(--ease-out),
-    opacity    var(--duration-fast) var(--ease-out);
+    background   var(--duration-fast) var(--ease-out),
+    color        var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow   var(--duration-fast) var(--ease-out),
+    opacity      var(--duration-fast) var(--ease-out);
 
   &:disabled {
     opacity: 0.45;
     cursor: not-allowed;
   }
 
-  // ── 变体：实心主色 ─────────────────────────────────────────────────
-  &--primary {
-    background: var(--color-brand);
-    color: #fff;
-
-    &:hover:not(:disabled)  { background: var(--color-brand-hover); }
-    &:active:not(:disabled) { transform: translateY(1px); }
-  }
-
-  // ── 变体：描边幽灵 ─────────────────────────────────────────────────
-  &--ghost {
+  // ── 变体：默认（白底描边）─────────────────────────────────────────────
+  &--default {
     background: var(--color-paper);
-    color: var(--color-ink-1);
-    border: 1px solid var(--color-border-2);
+    color: var(--color-ink-2);
+    border: 0.5px solid var(--color-border-2);
 
     &:hover:not(:disabled) {
       background: var(--color-paper-2);
@@ -53,10 +44,44 @@
     }
   }
 
-  // ── 变体：纯文字（透明底 + hover 浮起）───────────────────────────────
+  // ── 变体：实心主色 ─────────────────────────────────────────────────────
+  &--primary {
+    background: var(--color-brand);
+    color: #fff;
+    border: 0.5px solid var(--color-brand);
+
+    &:hover:not(:disabled)  { background: var(--color-brand-hover); border-color: var(--color-brand-hover); }
+    &:active:not(:disabled) { transform: translateY(1px); }
+  }
+
+  // ── 变体：深色 ─────────────────────────────────────────────────────────
+  &--dark {
+    background: var(--color-ink-1);
+    color: #fff;
+    border: 0.5px solid var(--color-ink-1);
+
+    &:hover:not(:disabled)  { background: var(--color-ink-2); border-color: var(--color-ink-2); }
+    &:active:not(:disabled) { transform: translateY(1px); }
+  }
+
+  // ── 变体：描边幽灵 ─────────────────────────────────────────────────────
+  &--ghost {
+    background: transparent;
+    color: var(--color-ink-2);
+    border: 0.5px solid var(--color-border-2);
+
+    &:hover:not(:disabled) {
+      background: var(--color-paper-2);
+      border-color: var(--color-ink-3);
+      color: var(--color-ink-1);
+    }
+  }
+
+  // ── 变体：纯文字 ──────────────────────────────────────────────────────
   &--text {
     background: transparent;
     color: var(--color-ink-2);
+    border: none;
     padding: var(--space-1) var(--space-2);
 
     &:hover:not(:disabled) {
@@ -65,12 +90,37 @@
     }
   }
 
-  // ── 变体：图标按钮（方形）──────────────────────────────────────────
+  // ── 变体：成功（绿色软底）─────────────────────────────────────────────
+  &--success {
+    background: var(--color-success-soft);
+    color: var(--color-success);
+    border: 0.5px solid rgba(22, 101, 52, 0.22);
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--color-success-soft) 70%, var(--color-success) 30%);
+    }
+    &:active:not(:disabled) { transform: translateY(1px); }
+  }
+
+  // ── 变体：危险（红色软底）─────────────────────────────────────────────
+  &--danger {
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+    border: 0.5px solid rgba(192, 57, 43, 0.22);
+
+    &:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--color-danger-soft) 70%, var(--color-danger) 30%);
+    }
+    &:active:not(:disabled) { transform: translateY(1px); }
+  }
+
+  // ── 变体：图标按钮（方形）──────────────────────────────────────────────
   &--icon {
     width: 32px;
     height: 32px;
     padding: 0;
     color: var(--color-ink-2);
+    border: none;
     border-radius: var(--radius-md);
 
     &:hover:not(:disabled) {
@@ -82,16 +132,17 @@
     }
   }
 
-  // ── 尺寸：小 ────────────────────────────────────────────────────────
+  // ── 尺寸：小 ────────────────────────────────────────────────────────────
   &--sm {
-    padding: 6px var(--space-3);
-    font-size: var(--font-size-base);
+    padding: 5px var(--space-3);
+    font-size: var(--font-size-sm);
     min-height: 28px;
   }
 
-  // ── 尺寸：大 ────────────────────────────────────────────────────────
+  // ── 尺寸：大 ────────────────────────────────────────────────────────────
   &--lg {
     padding: var(--space-2) var(--space-5);
     font-size: var(--font-size-md);
+    min-height: 36px;
   }
 }
