@@ -1,4 +1,3 @@
-import React from "react";
 import "./ShortcutModal.scss";
 
 const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] }[] = [

@@ -2,16 +2,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use tauri::ipc::Response;
+use tauri::State;
 
 use crate::audio::decode_audio;
-use crate::waveform::{self, builder, ViewRange};
-use crate::audiobook::{parse_audiobook, AudiobookMeta};
-use crate::audiobook::{export_chapter_slice as audiobook_export_chapter_slice};
+use crate::audiobook::export_chapter_slice as audiobook_export_chapter_slice;
+use crate::audiobook::remove_recent_book;
 use crate::audiobook::{get_progress, set_progress, BookProgress};
 use crate::audiobook::{get_recent_books, push_recent_book, RecentBook};
-use crate::audiobook::remove_recent_book;
+use crate::audiobook::{parse_audiobook, AudiobookMeta};
+use crate::waveform::{self, builder, ViewRange};
 
 use tauri::AppHandle;
 use tauri::Manager;
@@ -70,7 +70,7 @@ pub struct LabelDto {
 pub enum ChannelDataDto {
     Envelope { peaks: Vec<PeakDto> },
     Polyline { points: Vec<[f32; 2]> },
-    Stem     { points: Vec<[f32; 2]> },
+    Stem { points: Vec<[f32; 2]> },
 }
 
 #[derive(Debug, Serialize)]
@@ -134,7 +134,11 @@ pub fn get_peaks(view: PeakViewDto, state: State<AppState>) -> Result<RenderData
             waveform::ChannelRenderData::Envelope(peaks) => ChannelDataDto::Envelope {
                 peaks: peaks
                     .into_iter()
-                    .map(|p| PeakDto { min: p.min, max: p.max, rms: p.rms })
+                    .map(|p| PeakDto {
+                        min: p.min,
+                        max: p.max,
+                        rms: p.rms,
+                    })
                     .collect(),
             },
             waveform::ChannelRenderData::Polyline(pts) => ChannelDataDto::Polyline {
@@ -171,8 +175,8 @@ pub fn load_labels(path: String) -> Result<Vec<LabelDto>, String> {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
         if parts.len() >= 2 {
             let start: f64 = parts[0].trim().parse().unwrap_or(0.0);
-            let end: f64   = parts[1].trim().parse().unwrap_or(0.0);
-            let text       = parts.get(2).unwrap_or(&"").trim().to_string();
+            let end: f64 = parts[1].trim().parse().unwrap_or(0.0);
+            let text = parts.get(2).unwrap_or(&"").trim().to_string();
             labels.push(LabelDto { start, end, text });
         }
     }
@@ -210,11 +214,12 @@ pub fn split_audio(
     for (i, label) in labels.iter().enumerate() {
         let out_path = out_dir.join(format!("{:04}.mp3", i));
         let start_sample = ((label.start * sr).round() as usize).min(total);
-        let end_sample = ((label.end * sr).round() as usize).min(total).max(start_sample);
+        let end_sample = ((label.end * sr).round() as usize)
+            .min(total)
+            .max(start_sample);
 
         let slice = &mono[start_sample..end_sample];
-        write_mp3(&out_path, slice, target_sr)
-            .map_err(|e| format!("Segment {i}: {e}"))?;
+        write_mp3(&out_path, slice, target_sr).map_err(|e| format!("Segment {i}: {e}"))?;
         segment_paths.push(out_path.to_string_lossy().into_owned());
     }
 
@@ -241,16 +246,16 @@ fn downmix_to_mono(audio: &crate::audio::DecodedAudio) -> Vec<f32> {
 
 fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> anyhow::Result<()> {
     use anyhow::Context;
-    use ffmpeg_next as ffmpeg;
-    use ffmpeg::util::frame::audio::Audio as AudioFrame;
-    use ffmpeg::format::Sample;
     use ffmpeg::format::sample::Type as SampleType;
+    use ffmpeg::format::Sample;
+    use ffmpeg::util::frame::audio::Audio as AudioFrame;
     use ffmpeg::ChannelLayout;
+    use ffmpeg_next as ffmpeg;
 
     ffmpeg::init().context("FFmpeg init")?;
 
-    let mut output = ffmpeg::format::output(path)
-        .with_context(|| format!("open output {}", path.display()))?;
+    let mut output =
+        ffmpeg::format::output(path).with_context(|| format!("open output {}", path.display()))?;
 
     let codec = ffmpeg::encoder::find(ffmpeg::codec::Id::MP3)
         .ok_or_else(|| anyhow::anyhow!("MP3 encoder not found"))?;
@@ -302,9 +307,13 @@ fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> anyhow::Result<(
                 Ok(_) => {
                     packet.rescale_ts(time_base, stream_time_base);
                     packet.set_stream(0);
-                    packet.write_interleaved(&mut output).context("write_interleaved")?;
+                    packet
+                        .write_interleaved(&mut output)
+                        .context("write_interleaved")?;
                 }
-                Err(ffmpeg::Error::Other { errno: ffmpeg::error::EAGAIN }) => break,
+                Err(ffmpeg::Error::Other {
+                    errno: ffmpeg::error::EAGAIN,
+                }) => break,
                 Err(e) => return Err(anyhow::anyhow!(e)).context("receive_packet"),
             }
         }
@@ -317,10 +326,14 @@ fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> anyhow::Result<(
             Ok(_) => {
                 packet.rescale_ts(time_base, stream_time_base);
                 packet.set_stream(0);
-                packet.write_interleaved(&mut output).context("write_interleaved")?;
+                packet
+                    .write_interleaved(&mut output)
+                    .context("write_interleaved")?;
             }
             Err(ffmpeg::Error::Eof) => break,
-            Err(ffmpeg::Error::Other { errno: ffmpeg::error::EAGAIN }) => break,
+            Err(ffmpeg::Error::Other {
+                errno: ffmpeg::error::EAGAIN,
+            }) => break,
             Err(e) => return Err(anyhow::anyhow!(e)).context("receive_packet"),
         }
     }
@@ -331,32 +344,34 @@ fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> anyhow::Result<(
 
 #[tauri::command]
 pub fn transcribe_segments(
+    app: AppHandle,  
     segment_paths: Vec<String>,
     model: String,
 ) -> Result<Vec<String>, String> {
     use whisper_rs::{WhisperContext, WhisperContextParameters};
 
-    let model_path = model_path_for(&model);
+    let model_path = model_path_for(&app, &model);
     if !model_path.exists() {
         return Err(format!(
             "Whisper 模型文件不存在：{}\n请运行 scripts/download_model.sh {} 下载",
-            model_path.display(), model
+            model_path.display(),
+            model
         ));
     }
 
     let ctx = WhisperContext::new_with_params(
         model_path.to_str().ok_or("model path is not valid UTF-8")?,
         WhisperContextParameters::default(),
-    ).map_err(|e| format!("Load whisper model: {e}"))?;
+    )
+    .map_err(|e| format!("Load whisper model: {e}"))?;
 
     let mut results = Vec::with_capacity(segment_paths.len());
 
     for path in &segment_paths {
-        let text = transcribe_one(&ctx, path)
-            .unwrap_or_else(|e| {
-                log::warn!("Transcribe {path} failed: {e}");
-                String::new()
-            });
+        let text = transcribe_one(&ctx, path).unwrap_or_else(|e| {
+            log::warn!("Transcribe {path} failed: {e}");
+            String::new()
+        });
         results.push(text);
     }
 
@@ -364,59 +379,67 @@ pub fn transcribe_segments(
 }
 
 fn get_or_load_whisper_ctx<'a>(
+    app: &AppHandle, 
     state: &'a State<AppState>,
     model: &str,
 ) -> Result<std::sync::MutexGuard<'a, Option<(String, whisper_rs::WhisperContext)>>, String> {
     use whisper_rs::{WhisperContext, WhisperContextParameters};
- 
+
     let mut guard = state.whisper_ctx.lock().unwrap();
- 
+
     // 已经加载且型号匹配 → 直接返回
     let needs_load = match &*guard {
         Some((cached_model, _)) if cached_model == model => false,
         _ => true,
     };
- 
+
     if needs_load {
-        let model_path = model_path_for(model);
+        let model_path = model_path_for(&app, model);
         if !model_path.exists() {
             return Err(format!(
                 "Whisper 模型文件不存在：{}\n请运行 scripts/download_model.sh {} 下载",
-                model_path.display(), model
+                model_path.display(),
+                model
             ));
         }
- 
-        log::info!("Loading Whisper model: {} from {}", model, model_path.display());
+
+        log::info!(
+            "Loading Whisper model: {} from {}",
+            model,
+            model_path.display()
+        );
         let ctx = WhisperContext::new_with_params(
             model_path.to_str().ok_or("model path is not valid UTF-8")?,
             WhisperContextParameters::default(),
-        ).map_err(|e| format!("Load whisper model: {e}"))?;
- 
+        )
+        .map_err(|e| format!("Load whisper model: {e}"))?;
+
         *guard = Some((model.to_string(), ctx));
     }
- 
+
     Ok(guard)
 }
 
 #[tauri::command]
 pub fn transcribe_recording(
+    app: AppHandle,
     audio_bytes: Vec<u8>,
     extension: String,
     model: Option<String>,
     state: State<AppState>,
 ) -> Result<String, String> {
     use std::io::Write;
- 
+
     let model = model.unwrap_or_else(|| "base".to_string());
- 
+
     if audio_bytes.is_empty() {
         return Err("Empty audio data".into());
     }
- 
+
     // 1. 写到临时文件（复用 get_temp_dir 同一目录）
     let dir = std::env::temp_dir().join("langlisten_recordings");
     std::fs::create_dir_all(&dir).map_err(|e| format!("create tmp dir: {e}"))?;
- 
+
     // 用纳秒级时间戳避免并发冲突
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -424,55 +447,55 @@ pub fn transcribe_recording(
         .unwrap_or(0);
     let safe_ext = extension.trim_start_matches('.').to_lowercase();
     let tmp_path = dir.join(format!("rec_{timestamp}.{safe_ext}"));
- 
+
     {
-        let mut f = std::fs::File::create(&tmp_path)
-            .map_err(|e| format!("create tmp file: {e}"))?;
+        let mut f =
+            std::fs::File::create(&tmp_path).map_err(|e| format!("create tmp file: {e}"))?;
         f.write_all(&audio_bytes)
             .map_err(|e| format!("write tmp file: {e}"))?;
     }
- 
+
     // 2. 复用 transcribe_one（内部走 decode_audio + downmix_to_mono + Whisper）
     let result = {
-        let guard = get_or_load_whisper_ctx(&state, &model)?;
+        let guard = get_or_load_whisper_ctx(&app, &state, &model)?;
         let (_, ctx) = guard.as_ref().expect("ctx is loaded");
         transcribe_one(ctx, tmp_path.to_str().ok_or("tmp path not utf-8")?)
             .map_err(|e| format!("transcribe: {e}"))
     };
- 
+
     // 3. 删除临时文件（不影响主流程，失败仅记日志）
     if let Err(e) = std::fs::remove_file(&tmp_path) {
         log::warn!("Remove tmp recording {} failed: {}", tmp_path.display(), e);
     }
- 
+
     result
 }
 
-fn model_path_for(model: &str) -> PathBuf {
-    let exe_dir = std::env::current_exe()
+fn model_path_for(app: &AppHandle, model: &str) -> PathBuf {
+    // 1. bundle 后：<app>.app/Contents/Resources/whisper-models/
+    //    dev 模式：tauri.conf.json 里配置的 resourceDir（通常是项目根）
+    let resource_base = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|p| p.join("whisper-models"))
+        .filter(|p| p.exists());
+
+    // 2. dev 回退：可执行文件往上两级找（兼容 target/debug/xxx）
+    let dev_base = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."));
+        .map(|exe_dir| exe_dir.join("../../whisper-models"))
+        .filter(|p| p.exists());
 
-    let candidates = [
-        exe_dir.join("../../../whisper-models"),
-        exe_dir.join("../../whisper-models"),
-        PathBuf::from("whisper-models"),
-    ];
-
-    let base_dir = candidates
-        .iter()
-        .find(|p| p.exists())
-        .cloned()
-        .unwrap_or_else(|| exe_dir.join("../../../whisper-models"));
+    let base_dir = resource_base
+        .or(dev_base)
+        .unwrap_or_else(|| PathBuf::from("whisper-models"));
 
     base_dir.join(format!("ggml-{model}.en.bin"))
 }
 
-fn transcribe_one(
-    ctx: &whisper_rs::WhisperContext,
-    wav_path: &str,
-) -> anyhow::Result<String> {
+fn transcribe_one(ctx: &whisper_rs::WhisperContext, wav_path: &str) -> anyhow::Result<String> {
     use anyhow::Context;
     use whisper_rs::{FullParams, SamplingStrategy};
 
@@ -541,24 +564,29 @@ pub fn build_zip(
             index: i,
             audio: format!("segments/{:04}.mp3", i),
             start: labels.get(i).map(|l| l.start).unwrap_or(0.0),
-            end:   labels.get(i).map(|l| l.end).unwrap_or(0.0),
-            text:  transcriptions.get(i).cloned().unwrap_or_default(),
+            end: labels.get(i).map(|l| l.end).unwrap_or(0.0),
+            text: transcriptions.get(i).cloned().unwrap_or_default(),
             label: labels.get(i).map(|l| l.text.clone()).unwrap_or_default(),
         })
         .collect();
 
-    let metadata = Metadata { version: 1, segments };
+    let metadata = Metadata {
+        version: 1,
+        segments,
+    };
     let json = serde_json::to_string_pretty(&metadata).map_err(|e| e.to_string())?;
 
-    zip.start_file("metadata.json", opts).map_err(|e| e.to_string())?;
+    zip.start_file("metadata.json", opts)
+        .map_err(|e| e.to_string())?;
     zip.write_all(json.as_bytes()).map_err(|e| e.to_string())?;
 
     for (i, seg_path) in segment_paths.iter().enumerate() {
         let file_name = format!("segments/{:04}.mp3", i);
-        zip.start_file(&file_name, opts).map_err(|e| e.to_string())?;
+        zip.start_file(&file_name, opts)
+            .map_err(|e| e.to_string())?;
 
-        let mut seg_file = std::fs::File::open(seg_path)
-            .map_err(|e| format!("Open segment {seg_path}: {e}"))?;
+        let mut seg_file =
+            std::fs::File::open(seg_path).map_err(|e| format!("Open segment {seg_path}: {e}"))?;
         let mut buf = Vec::new();
         seg_file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
         zip.write_all(&buf).map_err(|e| e.to_string())?;
@@ -613,17 +641,14 @@ pub fn export_chapter_slice(
     start_sec: f64,
     end_sec: f64,
 ) -> Result<Response, String> {
-    let bytes = audiobook_export_chapter_slice(&path, start_sec, end_sec)
-        .map_err(|e| e.to_string())?;
+    let bytes =
+        audiobook_export_chapter_slice(&path, start_sec, end_sec).map_err(|e| e.to_string())?;
     Ok(Response::new(bytes))
 }
 
 /// 读取播放进度
 #[tauri::command]
-pub fn get_audiobook_progress(
-    app: AppHandle,
-    book_path: String,
-) -> BookProgress {
+pub fn get_audiobook_progress(app: AppHandle, book_path: String) -> BookProgress {
     let dir = app_data_dir(&app);
     get_progress(&dir, &book_path)
 }
@@ -640,7 +665,10 @@ pub fn save_audiobook_progress(
     set_progress(
         &dir,
         &book_path,
-        BookProgress { chapter_index, position_sec },
+        BookProgress {
+            chapter_index,
+            position_sec,
+        },
     )
     .map_err(|e| e.to_string())
 }
@@ -661,8 +689,7 @@ pub fn push_recent_audiobook(
     author: String,
 ) -> Result<(), String> {
     let dir = app_data_dir(&app);
-    push_recent_book(&dir, &book_path, &title, &author)
-        .map_err(|e| e.to_string())
+    push_recent_book(&dir, &book_path, &title, &author).map_err(|e| e.to_string())
 }
 
 fn app_data_dir(app: &AppHandle) -> String {
@@ -683,30 +710,31 @@ pub fn get_audiobook_cover(path: String) -> Option<CoverDto> {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoverDto {
-    pub data: String,       // base64
-    pub mime_type: String,  // "image/jpeg" | "image/png"
+    pub data: String,      // base64
+    pub mime_type: String, // "image/jpeg" | "image/png"
 }
 
 fn extract_cover(path: &str) -> anyhow::Result<Option<CoverDto>> {
-    use ffmpeg_next as ffmpeg;
     use anyhow::Context;
+    use ffmpeg_next as ffmpeg;
 
     ffmpeg::init().context("FFmpeg init")?;
-    let input = ffmpeg::format::input(&path)
-        .with_context(|| format!("Cannot open: {path}"))?;
+    let input = ffmpeg::format::input(&path).with_context(|| format!("Cannot open: {path}"))?;
 
     // 优先找 ATTACHED_PIC 标志的流，其次找任意 Video 流
     // 用 parameters().medium() 而不是 codec().medium()（新版 ffmpeg-next API）
-    let stream_index = input.streams().find(|s| {
-        use ffmpeg_next::format::stream::disposition::Disposition;
-        s.disposition().contains(Disposition::ATTACHED_PIC)
-    })
-    .or_else(|| {
-        input.streams().find(|s| {
-            s.parameters().medium() == ffmpeg_next::media::Type::Video
+    let stream_index = input
+        .streams()
+        .find(|s| {
+            use ffmpeg_next::format::stream::disposition::Disposition;
+            s.disposition().contains(Disposition::ATTACHED_PIC)
         })
-    })
-    .map(|s| s.index());
+        .or_else(|| {
+            input
+                .streams()
+                .find(|s| s.parameters().medium() == ffmpeg_next::media::Type::Video)
+        })
+        .map(|s| s.index());
 
     let stream_index = match stream_index {
         Some(i) => i,
@@ -714,11 +742,13 @@ fn extract_cover(path: &str) -> anyhow::Result<Option<CoverDto>> {
     };
 
     // 重新打开文件读 packet（避免生命周期问题）
-    let mut input2 = ffmpeg::format::input(&path)
-        .with_context(|| format!("Cannot reopen: {path}"))?;
+    let mut input2 =
+        ffmpeg::format::input(&path).with_context(|| format!("Cannot reopen: {path}"))?;
 
     for (stream, packet) in input2.packets() {
-        if stream.index() != stream_index { continue; }
+        if stream.index() != stream_index {
+            continue;
+        }
         let data = match packet.data() {
             Some(d) if !d.is_empty() => d,
             _ => break,
@@ -733,7 +763,7 @@ fn extract_cover(path: &str) -> anyhow::Result<Option<CoverDto>> {
             "image/jpeg" // 兜底
         };
 
-        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
         return Ok(Some(CoverDto {
             data: STANDARD.encode(data),
             mime_type: mime_type.to_string(),
@@ -744,10 +774,7 @@ fn extract_cover(path: &str) -> anyhow::Result<Option<CoverDto>> {
 }
 
 #[tauri::command]
-pub fn remove_recent_audiobook(
-    app: AppHandle,
-    book_path: String,
-) -> Result<(), String> {
+pub fn remove_recent_audiobook(app: AppHandle, book_path: String) -> Result<(), String> {
     let dir = app_data_dir(&app);
     remove_recent_book(&dir, &book_path).map_err(|e| e.to_string())
 }

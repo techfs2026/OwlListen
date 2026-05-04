@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AudiobookCover, AudiobookMeta, Chapter } from "@/utils/audiobookApi";
 import type { PlayState } from "@/hooks/useAudiobook";
 import { PlayingBarsLarge } from "./icons";

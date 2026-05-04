@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import type { RecentBook } from "@/utils/audiobookApi";
 import { CloseIcon } from "./icons";
 import "./EmptyState.scss";
