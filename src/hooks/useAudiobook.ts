@@ -1,11 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   loadAudiobook,
   getAudiobookProgress,
   saveAudiobookProgress,
   getRecentAudiobooks,
   pushRecentAudiobook,
-  toAssetUrl,
   type AudiobookMeta,
   type Chapter,
   type RecentBook,
@@ -17,6 +17,8 @@ export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75] as const;
 export type Speed = typeof SPEEDS[number];
 
 const SAVE_INTERVAL_MS = 5000;
+// 内存中最多保留几章的 Blob URL（当前章 + 下一章）
+const MAX_CACHED_CHAPTERS = 2;
 
 export interface UseAudiobookReturn {
   meta: AudiobookMeta | null;
@@ -37,13 +39,102 @@ export interface UseAudiobookReturn {
   setSpeed: (s: Speed) => void;
 }
 
-let globalCtx: AudioContext | null = null;
-function getCtx(): AudioContext {
-  if (!globalCtx || globalCtx.state === "closed") globalCtx = new AudioContext();
-  return globalCtx;
+// ── 单例 <audio> 元素 ──────────────────────────────────────────────────────────
+// 不挂到 DOM 也能播放。所有书共用一个，避免多个并发播放。
+
+let globalAudio: HTMLAudioElement | null = null;
+function getAudio(): HTMLAudioElement {
+  if (!globalAudio) {
+    globalAudio = new Audio();
+    globalAudio.preservesPitch = true;
+    // Safari 用的是带前缀的旧名，写一次保险
+    (globalAudio as any).webkitPreservesPitch = true;
+    (globalAudio as any).mozPreservesPitch = true;
+  }
+  return globalAudio;
 }
 
-const bookCache = new Map<string, AudioBuffer>();
+// ── 章节级 Blob URL 缓存（LRU，最多 MAX_CACHED_CHAPTERS 条）──────────────────
+// key: `${bookPath}::${chapterIndex}`
+
+interface CacheEntry {
+  url: string;       // Blob URL
+  duration: number;  // 章节秒数
+  lastUsed: number;  // Date.now()
+}
+const chapterCache = new Map<string, CacheEntry>();
+
+function cacheKey(bookPath: string, idx: number) {
+  return `${bookPath}::${idx}`;
+}
+
+function getCached(bookPath: string, idx: number): CacheEntry | null {
+  const entry = chapterCache.get(cacheKey(bookPath, idx));
+  if (!entry) return null;
+  entry.lastUsed = Date.now();
+  return entry;
+}
+
+function setCached(bookPath: string, idx: number, url: string, duration: number) {
+  const key = cacheKey(bookPath, idx);
+  // 同 key 旧条目先 revoke
+  const existing = chapterCache.get(key);
+  if (existing) URL.revokeObjectURL(existing.url);
+
+  chapterCache.set(key, { url, duration, lastUsed: Date.now() });
+
+  // LRU 驱逐
+  while (chapterCache.size > MAX_CACHED_CHAPTERS) {
+    let oldestKey = "";
+    let oldestTime = Infinity;
+    for (const [k, v] of chapterCache) {
+      if (v.lastUsed < oldestTime) { oldestTime = v.lastUsed; oldestKey = k; }
+    }
+    if (!oldestKey) break;
+    const old = chapterCache.get(oldestKey);
+    if (old) URL.revokeObjectURL(old.url);
+    chapterCache.delete(oldestKey);
+  }
+}
+
+/** 切换书时调用：清掉所有非当前书的缓存，避免内存堆积。 */
+function evictOtherBooks(currentBookPath: string) {
+  for (const [key, entry] of chapterCache) {
+    if (!key.startsWith(currentBookPath + "::")) {
+      URL.revokeObjectURL(entry.url);
+      chapterCache.delete(key);
+    }
+  }
+}
+
+// ── 从 Rust 加载单章并生成 Blob URL ─────────────────────────────────────────
+
+async function loadChapterEntry(
+  bookPath: string,
+  chapter: Chapter,
+  idx: number,
+): Promise<CacheEntry> {
+  const cached = getCached(bookPath, idx);
+  if (cached) return cached;
+
+  // Tauri Response::new(Vec<u8>) → ArrayBuffer，零拷贝
+  const arrayBuffer = await invoke<ArrayBuffer>("export_chapter_slice", {
+    path: bookPath,
+    startSec: chapter.startSec,
+    endSec: chapter.endSec,
+  });
+
+  // 直接做成 Blob URL，不再 decodeAudioData
+  // type 用 audio/aac，浏览器据此选解码器
+  const blob = new Blob([arrayBuffer], { type: "audio/aac" });
+  const url = URL.createObjectURL(blob);
+  const duration = chapter.endSec - chapter.startSec;
+
+  setCached(bookPath, idx, url, duration);
+  return { url, duration, lastUsed: Date.now() };
+}
+
+// ── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useAudiobook(): UseAudiobookReturn {
   const [meta, setMeta] = useState<AudiobookMeta | null>(null);
@@ -54,144 +145,122 @@ export function useAudiobook(): UseAudiobookReturn {
   const [speed, setSpeedState] = useState<Speed>(1);
   const [recentBooks, setRecentBooks] = useState<RecentBook[]>([]);
 
-  const bookPathRef        = useRef("");
-  const metaRef            = useRef<AudiobookMeta | null>(null);
-  const chapterIndexRef    = useRef(0);
-  const sourceRef          = useRef<AudioBufferSourceNode | null>(null);
-  const offsetRef          = useRef(0);
-  const startCtxTimeRef    = useRef(0);
-  const isPlayingRef       = useRef(false);
-  const rafRef             = useRef(0);
-  const speedRef           = useRef<Speed>(1);
-  const saveTimerRef       = useRef<ReturnType<typeof setInterval> | null>(null);
-  const bufferRef          = useRef<AudioBuffer | null>(null);
+  // refs
+  const bookPathRef = useRef("");
+  const metaRef = useRef<AudiobookMeta | null>(null);
+  const chapterIndexRef = useRef(0);
+  const speedRef = useRef<Speed>(1);
+  /** 当前章节的 Blob URL（用于判断是否需要 reload audio.src） */
+  const currentUrlRef = useRef<string | null>(null);
+  /** 上一次保存进度的时间戳 */
+  const lastSavedAtRef = useRef(0);
+  /** 是否正在 seek（避免 timeupdate 反复触发保存）*/
+  const seekingRef = useRef(false);
 
-  // ── 工具 ──────────────────────────────────────────────────────────────────
+  // ── 核心：绑定 <audio> 事件 ────────────────────────────────────────────────
 
-  const stopSource = useCallback(() => {
-    if (sourceRef.current) {
-      sourceRef.current.onended = null;
-      try { sourceRef.current.stop(); } catch (_) {}
-      sourceRef.current.disconnect();
-      sourceRef.current = null;
-    }
-  }, []);
+  useEffect(() => {
+    const audio = getAudio();
 
-  const stopRaf = useCallback(() => {
-    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
-  }, []);
+    const onTimeUpdate = () => {
+      // 拖动滑块期间不更新（防止抖动）
+      if (seekingRef.current) return;
+      setCurrentTime(audio.currentTime);
 
-  const stopSaveTimer = useCallback(() => {
-    if (saveTimerRef.current) { clearInterval(saveTimerRef.current); saveTimerRef.current = null; }
-  }, []);
-
-  const globalPos = useCallback((): number => {
-    if (!isPlayingRef.current) return offsetRef.current;
-    const ctx = getCtx();
-    const elapsed = (ctx.currentTime - startCtxTimeRef.current) * speedRef.current;
-    return offsetRef.current + Math.max(0, elapsed);
-  }, []);
-
-  const secToChapter = useCallback((globalSec: number): number => {
-    const chapters = metaRef.current?.chapters ?? [];
-    for (let i = chapters.length - 1; i >= 0; i--) {
-      if (globalSec >= chapters[i].startSec) return i;
-    }
-    return 0;
-  }, []);
-
-  const tick = useCallback(() => {
-    if (!isPlayingRef.current) return;
-    const pos = globalPos();
-    const chIdx = secToChapter(pos);
-    const chapter = metaRef.current?.chapters[chIdx];
-    const chTime = chapter ? pos - chapter.startSec : pos;
-    setCurrentTime(chTime);
-    if (chIdx !== chapterIndexRef.current) {
-      chapterIndexRef.current = chIdx;
-      setCurrentChapterIndex(chIdx);
-    }
-    rafRef.current = requestAnimationFrame(tick);
-  }, [globalPos, secToChapter]);
-
-  // ── 解码 ──────────────────────────────────────────────────────────────────
-
-  const decodeBook = useCallback(async (path: string): Promise<AudioBuffer> => {
-    if (bookCache.has(path)) return bookCache.get(path)!;
-    const ctx = getCtx();
-    const resp = await fetch(toAssetUrl(path));
-    if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
-    const buf = await ctx.decodeAudioData(await resp.arrayBuffer());
-    bookCache.set(path, buf);
-    return buf;
-  }, []);
-
-  // ── 核心播放 ──────────────────────────────────────────────────────────────
-
-  const startPlayback = useCallback((buffer: AudioBuffer, fromGlobalSec: number) => {
-    const ctx = getCtx();
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
-
-    stopSource();
-    stopRaf();
-
-    const from = Math.max(0, Math.min(fromGlobalSec, buffer.duration));
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.playbackRate.value = speedRef.current;
-    src.connect(ctx.destination);
-
-    src.onended = () => {
-      if (!isPlayingRef.current) return;
-      isPlayingRef.current = false;
-      stopRaf();
-      setPlayState("ready");
-      saveAudiobookProgress(bookPathRef.current, 0, 0).catch(() => {});
+      // 节流保存进度
+      const now = Date.now();
+      if (!audio.paused && now - lastSavedAtRef.current > SAVE_INTERVAL_MS) {
+        lastSavedAtRef.current = now;
+        saveAudiobookProgress(
+          bookPathRef.current,
+          chapterIndexRef.current,
+          audio.currentTime,
+        ).catch(() => {});
+      }
     };
 
-    src.start(0, from);
-    sourceRef.current = src;
-    offsetRef.current = from;
-    startCtxTimeRef.current = ctx.currentTime;
-    isPlayingRef.current = true;
-    setPlayState("playing");
-
-    const chIdx = secToChapter(from);
-    const chapter = metaRef.current?.chapters[chIdx];
-    chapterIndexRef.current = chIdx;
-    setCurrentChapterIndex(chIdx);
-    setCurrentTime(chapter ? from - chapter.startSec : from);
-
-    rafRef.current = requestAnimationFrame(tick);
-  }, [stopSource, stopRaf, tick, secToChapter]);
-
-  // ── 进度自动保存 ──────────────────────────────────────────────────────────
-
-  const startSaveTimer = useCallback(() => {
-    stopSaveTimer();
-    saveTimerRef.current = setInterval(() => {
-      if (!isPlayingRef.current) return;
-      const pos = globalPos();
-      const chIdx = secToChapter(pos);
-      saveAudiobookProgress(bookPathRef.current, chIdx, pos - (metaRef.current?.chapters[chIdx]?.startSec ?? 0))
+    const onEnded = () => {
+      // 章节自然结束：停在章节开头（你确认过不连播）
+      setPlayState("paused");
+      setCurrentTime(0);
+      audio.currentTime = 0;
+      saveAudiobookProgress(bookPathRef.current, chapterIndexRef.current, 0)
         .catch(() => {});
-    }, SAVE_INTERVAL_MS);
-  }, [stopSaveTimer, globalPos, secToChapter]);
+    };
 
-  // ── 加载最近书单（初始化时） ──────────────────────────────────────────────
+    const onPlay = () => setPlayState("playing");
+    const onPause = () => {
+      // ended 事件也会触发 pause，让 onEnded 接管 paused 状态
+      if (!audio.ended) setPlayState("paused");
+    };
+
+    const onError = () => {
+      console.error("[audiobook] <audio> error:", audio.error);
+      setPlayState("paused");
+    };
+
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("error", onError);
+
+    return () => {
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("error", onError);
+    };
+  }, []);
+
+  // ── 装载某章节（设置 audio.src 并定位到 fromSec），不立刻 play ─────────────
+
+  const loadIntoAudioElement = useCallback(
+    (entry: CacheEntry, fromSec: number) => {
+      const audio = getAudio();
+      if (currentUrlRef.current !== entry.url) {
+        audio.src = entry.url;
+        currentUrlRef.current = entry.url;
+        // 新 src 后必须等 loadedmetadata 才能可靠地 set currentTime
+        // 但 currentTime 在 loadedmetadata 前赋值会被浏览器记住并应用，所以可直接设
+      }
+      const target = Math.max(0, Math.min(fromSec, entry.duration));
+      // currentTime 直接赋值即可——浏览器会在 metadata ready 后应用
+      audio.currentTime = target;
+      audio.playbackRate = speedRef.current;
+      audio.preservesPitch = true;
+      setCurrentTime(target);
+    },
+    [],
+  );
+
+  // ── 预加载相邻章节（仅下一章，prev 不主动预取）────────────────────────────
+
+  const prefetchAdjacent = useCallback((idx: number) => {
+    const chapters = metaRef.current?.chapters;
+    if (!chapters) return;
+    const path = bookPathRef.current;
+    const next = idx + 1;
+    if (next < chapters.length && !getCached(path, next)) {
+      // 后台静默：失败不影响主流程
+      loadChapterEntry(path, chapters[next], next).catch(() => {});
+    }
+  }, []);
+
+  // ── 初始化：拉最近书单 ───────────────────────────────────────────────────
 
   useEffect(() => {
     getRecentAudiobooks().then(setRecentBooks).catch(() => {});
   }, []);
 
-  // ── 公开 API ──────────────────────────────────────────────────────────────
+  // ── openBook ─────────────────────────────────────────────────────────────
 
   const openBook = useCallback(async (path: string) => {
-    stopSource();
-    stopRaf();
-    stopSaveTimer();
-    isPlayingRef.current = false;
-    bookCache.delete(path);
+    const audio = getAudio();
+    audio.pause();
+
+    evictOtherBooks(path);
     setPlayState("loading");
     setCurrentTime(0);
     setCurrentChapterIndex(0);
@@ -208,75 +277,101 @@ export function useAudiobook(): UseAudiobookReturn {
       setBookPath(path);
       setMeta(bookMeta);
 
-      // 记录最近打开，同时刷新列表
       pushRecentAudiobook(path, bookMeta.title, bookMeta.author)
         .then(() => getRecentAudiobooks())
         .then(setRecentBooks)
         .catch(() => {});
 
       const chIdx = Math.min(progress.chapterIndex, bookMeta.chapters.length - 1);
-      const globalSec = (bookMeta.chapters[chIdx]?.startSec ?? 0) + progress.positionSec;
+      const posSec = progress.positionSec;
 
       chapterIndexRef.current = chIdx;
       setCurrentChapterIndex(chIdx);
-      offsetRef.current = globalSec;
-      setCurrentTime(progress.positionSec);
 
-      setPlayState("loading");
-      const buffer = await decodeBook(path);
-      bufferRef.current = buffer;
+      const entry = await loadChapterEntry(path, bookMeta.chapters[chIdx], chIdx);
+      loadIntoAudioElement(entry, posSec);
       setPlayState("ready");
-      startSaveTimer();
+
+      prefetchAdjacent(chIdx);
     } catch (err) {
       console.error("[audiobook] open failed:", err);
       setPlayState("idle");
     }
-  }, [stopSource, stopRaf, stopSaveTimer, decodeBook, startSaveTimer]);
+  }, [loadIntoAudioElement, prefetchAdjacent]);
+
+  // ── 播放控制 ─────────────────────────────────────────────────────────────
 
   const play = useCallback(() => {
-    const buf = bufferRef.current;
-    if (!buf) return;
-    startPlayback(buf, offsetRef.current);
-  }, [startPlayback]);
+    const audio = getAudio();
+    if (!currentUrlRef.current) return;
+    audio.playbackRate = speedRef.current;
+    audio.preservesPitch = true;
+    audio.play().catch((err) => {
+      console.error("[audiobook] play failed:", err);
+    });
+    // playState 由 onPlay 事件更新
+  }, []);
 
   const pause = useCallback(() => {
-    if (!isPlayingRef.current) return;
-    const pos = globalPos();
-    offsetRef.current = pos;
-    isPlayingRef.current = false;
-    stopSource();
-    stopRaf();
-    const chIdx = secToChapter(pos);
-    const chTime = pos - (metaRef.current?.chapters[chIdx]?.startSec ?? 0);
-    setCurrentTime(chTime);
-    setPlayState("paused");
-    saveAudiobookProgress(bookPathRef.current, chIdx, chTime).catch(() => {});
-  }, [stopSource, stopRaf, globalPos, secToChapter]);
+    getAudio().pause();
+    // playState 由 onPause 事件更新
+    // 暂停时立刻保存一次进度
+    const audio = getAudio();
+    saveAudiobookProgress(
+      bookPathRef.current,
+      chapterIndexRef.current,
+      audio.currentTime,
+    ).catch(() => {});
+  }, []);
 
   const seekInChapter = useCallback((sec: number) => {
-    const chIdx = chapterIndexRef.current;
-    const chStart = metaRef.current?.chapters[chIdx]?.startSec ?? 0;
-    const globalSec = chStart + Math.max(0, sec);
-    offsetRef.current = globalSec;
-    setCurrentTime(Math.max(0, sec));
-    if (isPlayingRef.current && bufferRef.current) {
-      startPlayback(bufferRef.current, globalSec);
-    }
-  }, [startPlayback]);
+    const audio = getAudio();
+    seekingRef.current = true;
+    const clamped = Math.max(0, sec);
+    audio.currentTime = clamped;
+    setCurrentTime(clamped);
+    // 让浏览器处理完 seek，再恢复 timeupdate 同步
+    requestAnimationFrame(() => { seekingRef.current = false; });
+  }, []);
 
-  const goToChapter = useCallback((index: number, positionSec = 0) => {
+  // ── 章节跳转 ─────────────────────────────────────────────────────────────
+
+  const goToChapter = useCallback(async (index: number, positionSec = 0) => {
     const curMeta = metaRef.current;
     if (!curMeta) return;
+
     const clamped = Math.max(0, Math.min(index, curMeta.chapters.length - 1));
-    const globalSec = (curMeta.chapters[clamped]?.startSec ?? 0) + positionSec;
-    offsetRef.current = globalSec;
+    const chapter = curMeta.chapters[clamped];
+    const audio = getAudio();
+    const wasPlaying = !audio.paused;
+
+    audio.pause();
     chapterIndexRef.current = clamped;
     setCurrentChapterIndex(clamped);
-    setCurrentTime(positionSec);
-    if (isPlayingRef.current && bufferRef.current) {
-      startPlayback(bufferRef.current, globalSec);
+
+    const cached = getCached(bookPathRef.current, clamped);
+    if (cached) {
+      loadIntoAudioElement(cached, positionSec);
+      if (wasPlaying) play();
+      else setPlayState("ready");
+      prefetchAdjacent(clamped);
+      return;
     }
-  }, [startPlayback]);
+
+    setPlayState("loading");
+    try {
+      const entry = await loadChapterEntry(bookPathRef.current, chapter, clamped);
+      // 若加载期间用户又切走了，放弃
+      if (chapterIndexRef.current !== clamped) return;
+      loadIntoAudioElement(entry, positionSec);
+      if (wasPlaying) play();
+      else setPlayState("ready");
+      prefetchAdjacent(clamped);
+    } catch (err) {
+      console.error("[audiobook] goToChapter load failed:", err);
+      setPlayState("idle");
+    }
+  }, [loadIntoAudioElement, prefetchAdjacent, play]);
 
   const nextChapter = useCallback(() => {
     const curMeta = metaRef.current;
@@ -287,23 +382,36 @@ export function useAudiobook(): UseAudiobookReturn {
   }, [goToChapter]);
 
   const prevChapter = useCallback(() => {
-    if (chapterIndexRef.current > 0) goToChapter(chapterIndexRef.current - 1, 0);
-    else seekInChapter(0);
+    const audio = getAudio();
+    // 章节内已播超过 3 秒：回到开头；否则跳上一章
+    if (audio.currentTime > 3) {
+      seekInChapter(0);
+    } else if (chapterIndexRef.current > 0) {
+      goToChapter(chapterIndexRef.current - 1, 0);
+    } else {
+      seekInChapter(0);
+    }
   }, [goToChapter, seekInChapter]);
 
+  // ── 变速 ─────────────────────────────────────────────────────────────────
+
   const setSpeed = useCallback((s: Speed) => {
-    const pos = globalPos();
-    offsetRef.current = pos;
     speedRef.current = s;
     setSpeedState(s);
-    if (isPlayingRef.current && bufferRef.current) {
-      startPlayback(bufferRef.current, pos);
-    }
-  }, [globalPos, startPlayback]);
+    const audio = getAudio();
+    audio.playbackRate = s;
+    audio.preservesPitch = true; // 保险：某些浏览器在 src 切换后会重置
+  }, []);
+
+  // ── cleanup ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    return () => { stopSource(); stopRaf(); stopSaveTimer(); };
-  }, [stopSource, stopRaf, stopSaveTimer]);
+    return () => {
+      // 组件卸载时停止播放，但不清空缓存（同次 app 生命周期内可复用）
+      const audio = globalAudio;
+      if (audio) audio.pause();
+    };
+  }, []);
 
   const currentChapter = meta?.chapters[currentChapterIndex] ?? null;
 

@@ -1,0 +1,55 @@
+@use "../mixins" as *;
+
+// ──────────────────────────────────────────────────────────────────────────
+//  通用模态框
+//  .modal-overlay > .modal-card
+// ──────────────────────────────────────────────────────────────────────────
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+  animation: modal-fade-in var(--duration-base) var(--ease-out);
+}
+
+.modal-card {
+  background: var(--color-paper);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xl);
+  padding: var(--space-6) 36px;
+  width: 480px;
+  max-width: 90vw;
+  animation: modal-slide-up var(--duration-base) var(--ease-out);
+
+  &__title {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-base);
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+    margin-bottom: var(--space-5);
+  }
+
+  &__footer {
+    margin-top: var(--space-5);
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+    font-family: var(--font-mono);
+    text-align: center;
+  }
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modal-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

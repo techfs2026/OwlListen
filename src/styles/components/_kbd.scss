@@ -1,0 +1,26 @@
+.kbd {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    background: var(--color-paper-3);
+    border: 0.5px solid var(--color-border-2);
+    border-radius: var(--radius-sm);
+    padding: 2px var(--space-2);
+    color: var(--color-ink-2);
+    box-shadow: 0 1px 0 var(--color-border-2);
+    min-width: 40px;
+    text-align: center;
+    flex-shrink: 0;
+  
+    // 内联小型版本（用在按钮里）
+    &--inline {
+      font-size: 9px;
+      padding: 0 4px;
+      min-width: 0;
+      margin-left: 5px;
+      background: rgba(0, 0, 0, 0.06);
+      box-shadow: none;
+      color: var(--color-ink-3);
+      vertical-align: middle;
+    }
+  }

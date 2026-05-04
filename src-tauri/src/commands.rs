@@ -3,12 +3,15 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tauri::ipc::Response;
 
 use crate::audio::decode_audio;
 use crate::waveform::{self, builder, ViewRange};
 use crate::audiobook::{parse_audiobook, AudiobookMeta};
+use crate::audiobook::{export_chapter_slice as audiobook_export_chapter_slice};
 use crate::audiobook::{get_progress, set_progress, BookProgress};
 use crate::audiobook::{get_recent_books, push_recent_book, RecentBook};
+use crate::audiobook::remove_recent_book;
 
 use tauri::AppHandle;
 use tauri::Manager;
@@ -601,6 +604,20 @@ pub fn load_audiobook(path: String) -> Result<AudiobookMeta, String> {
     parse_audiobook(&path).map_err(|e| e.to_string())
 }
 
+/// 将指定时间区间的音频切片导出为 ADTS/AAC 字节流，直接返回给前端。
+/// 前端用 ctx.decodeAudioData(buffer) 即可解码播放，无需落盘。
+/// start_sec / end_sec 是相对整个文件的秒数（与 Chapter.startSec / endSec 一致）。
+#[tauri::command]
+pub fn export_chapter_slice(
+    path: String,
+    start_sec: f64,
+    end_sec: f64,
+) -> Result<Response, String> {
+    let bytes = audiobook_export_chapter_slice(&path, start_sec, end_sec)
+        .map_err(|e| e.to_string())?;
+    Ok(Response::new(bytes))
+}
+
 /// 读取播放进度
 #[tauri::command]
 pub fn get_audiobook_progress(
@@ -724,4 +741,13 @@ fn extract_cover(path: &str) -> anyhow::Result<Option<CoverDto>> {
     }
 
     Ok(None)
+}
+
+#[tauri::command]
+pub fn remove_recent_audiobook(
+    app: AppHandle,
+    book_path: String,
+) -> Result<(), String> {
+    let dir = app_data_dir(&app);
+    remove_recent_book(&dir, &book_path).map_err(|e| e.to_string())
 }

@@ -67,3 +67,7 @@ export async function getAudiobookCover(path: string): Promise<AudiobookCover | 
 export function toAssetUrl(path: string): string {
   return convertFileSrc(path);
 }
+
+export async function removeRecentAudiobook(path: string): Promise<void> {
+  return invoke("remove_recent_audiobook", { bookPath: path });
+}

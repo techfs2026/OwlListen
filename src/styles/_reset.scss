@@ -1,0 +1,15 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, #root {
+  height: 100%;
+}
+
+body {
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  // 注意：background / color / font-family / overflow 已经由 styles.ts 的
+  // injectGlobalStyles() 注入。这里不重复设置，避免 SCSS 与运行时注入打架。
+}
+
+button, input, select, textarea { font: inherit; }

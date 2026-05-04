@@ -1,0 +1,95 @@
+@use "@/styles/mixins" as *;
+
+.audiobook {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background: var(--color-paper-2);
+  overflow: hidden;
+  user-select: none;
+
+  // ── 工具栏 ──────────────────────────────────────────────────────────
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0 var(--space-4);
+    height: 48px;
+    background: var(--color-paper);
+    border-bottom: 0.5px solid var(--color-border);
+    flex-shrink: 0;
+    box-shadow: var(--shadow-sm);
+    z-index: var(--z-toolbar);
+  }
+
+  &__mode-tag {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+    padding: 3px var(--space-2);
+    background: var(--color-paper-3);
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+  }
+
+  &__divider {
+    width: 1px;
+    height: 20px;
+    background: var(--color-border);
+    margin: 0 var(--space-1);
+  }
+
+  &__book-info {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-left: var(--space-2);
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  &__book-title {
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    color: var(--color-ink-1);
+    @include text-ellipsis;
+  }
+
+  &__book-author {
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+    @include text-ellipsis;
+  }
+
+  &__toolbar-spacer {
+    flex: 1;
+  }
+
+  // ── 主体 ────────────────────────────────────────────────────────────
+  &__body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  &__sidebar {
+    flex-shrink: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    transition:
+      width var(--duration-slow) var(--ease-out),
+      opacity var(--duration-base) var(--ease-out);
+  }
+
+  &__main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow-y: auto;
+  }
+}

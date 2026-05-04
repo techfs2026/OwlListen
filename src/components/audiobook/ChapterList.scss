@@ -1,0 +1,124 @@
+@use "@/styles/mixins" as *;
+
+.chapter-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--color-paper-2);
+  border-right: 0.5px solid var(--color-border);
+  overflow: hidden;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px var(--space-4) 10px;
+    border-bottom: 0.5px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  &__label {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+  }
+
+  &__count {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-3);
+  }
+
+  &__items {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-1) 0;
+    @include scrollbar-thin;
+  }
+}
+
+.chapter-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px 10px 12px;
+  cursor: pointer;
+  border-left: 2.5px solid transparent;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+
+  &:hover:not(.chapter-item--active) {
+    background: var(--color-hover-overlay);
+  }
+
+  &--active {
+    background: var(--color-brand-soft);
+    border-left-color: var(--color-brand);
+
+    .chapter-item__idx {
+      color: var(--color-brand);
+    }
+
+    .chapter-item__title {
+      color: var(--color-ink-1);
+      font-weight: 600;
+    }
+  }
+
+  &__idx {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    min-width: 20px;
+    text-align: center;
+    padding-top: 2px;
+    flex-shrink: 0;
+    color: var(--color-ink-3);
+  }
+
+  &__info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  &__title {
+    font-size: var(--font-size-base);
+    line-height: var(--line-height-base);
+    color: var(--color-ink-2);
+    font-weight: 400;
+    @include text-ellipsis;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    color: var(--color-ink-3);
+  }
+
+  &__dot {
+    opacity: 0.5;
+  }
+
+  &__progress {
+    height: 2px;
+    background: var(--color-border-2);
+    border-radius: 1px;
+    overflow: hidden;
+    margin-top: var(--space-1);
+  }
+
+  &__progress-fill {
+    height: 100%;
+    background: var(--color-brand);
+    border-radius: 1px;
+    transition: width 0.5s linear;
+  }
+}

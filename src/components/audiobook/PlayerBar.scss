@@ -1,0 +1,136 @@
+.player-bar {
+  background: var(--color-paper);
+  border-top: 0.5px solid var(--color-border);
+  flex-shrink: 0;
+  user-select: none;
+  padding-bottom: var(--space-2);
+
+  &__seek-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4) var(--space-1);
+  }
+
+  &__time {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    color: var(--color-ink-2);
+    letter-spacing: -0.02em;
+    flex-shrink: 0;
+    min-width: 36px;
+
+    &--muted {
+      color: var(--color-ink-3);
+    }
+  }
+
+  &__progress-area {
+    flex: 1;
+    cursor: pointer;
+    height: 20px;
+    display: flex;
+    align-items: center;
+  }
+
+  &__progress-track {
+    flex: 1;
+    height: 3px;
+    background: var(--color-paper-2);
+    position: relative;
+    border-radius: 2px;
+    transition: height var(--duration-fast) var(--ease-out);
+  }
+
+  &__progress-area:hover &__progress-track {
+    height: 5px;
+  }
+
+  &__progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-brand), #60A5FA);
+    pointer-events: none;
+    border-radius: 2px;
+  }
+
+  &__progress-thumb {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translate(-50%, -50%);
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--color-brand);
+    box-shadow: 0 0 0 2px var(--color-paper),
+      0 1px 3px rgba(26, 39, 68, 0.2);
+    pointer-events: none;
+    transition: width var(--duration-fast) var(--ease-out),
+      height var(--duration-fast) var(--ease-out);
+  }
+
+  &__progress-area:hover &__progress-thumb {
+    width: 14px;
+    height: 14px;
+  }
+
+  &__controls {
+    display: flex;
+    align-items: center;
+    padding: 0 var(--space-4);
+  }
+
+  &__zone {
+    flex: 1;
+
+    &--center {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    &--right {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+  }
+
+  &__skip {
+    color: var(--color-ink-2);
+  }
+
+  &__speeds {
+    display: flex;
+    gap: 2px;
+    background: var(--color-paper-2);
+    border: 0.5px solid var(--color-border-2);
+    border-radius: var(--radius-md);
+    padding: 2px;
+  }
+
+  &__speed {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-sm);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 3px var(--space-2);
+    cursor: pointer;
+    background: transparent;
+    color: var(--color-ink-3);
+    transition: background var(--duration-fast) var(--ease-out),
+      color var(--duration-fast) var(--ease-out);
+
+    &:hover:not(.player-bar__speed--active) {
+      background: var(--color-hover-overlay);
+      color: var(--color-ink-1);
+    }
+
+    &--active {
+      background: var(--color-ink-1);
+      color: #fff;
+      font-weight: 600;
+    }
+  }
+}

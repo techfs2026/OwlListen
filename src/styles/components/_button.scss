@@ -1,0 +1,97 @@
+@use "../mixins" as *;
+
+// ──────────────────────────────────────────────────────────────────────────
+//  通用按钮
+//  .btn 基础类 + 修饰符
+//  用法: <button class="btn btn--primary">…</button>
+// ──────────────────────────────────────────────────────────────────────────
+
+.btn {
+  @include button-reset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-family: var(--font-sans);
+  padding: 8px var(--space-4);
+  font-size: var(--font-size-md);
+  min-height: 32px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color      var(--duration-fast) var(--ease-out),
+    border     var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    opacity    var(--duration-fast) var(--ease-out);
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  // ── 变体：实心主色 ─────────────────────────────────────────────────
+  &--primary {
+    background: var(--color-brand);
+    color: #fff;
+
+    &:hover:not(:disabled)  { background: var(--color-brand-hover); }
+    &:active:not(:disabled) { transform: translateY(1px); }
+  }
+
+  // ── 变体：描边幽灵 ─────────────────────────────────────────────────
+  &--ghost {
+    background: var(--color-paper);
+    color: var(--color-ink-1);
+    border: 1px solid var(--color-border-2);
+
+    &:hover:not(:disabled) {
+      background: var(--color-paper-2);
+      border-color: var(--color-ink-3);
+    }
+  }
+
+  // ── 变体：纯文字（透明底 + hover 浮起）───────────────────────────────
+  &--text {
+    background: transparent;
+    color: var(--color-ink-2);
+    padding: var(--space-1) var(--space-2);
+
+    &:hover:not(:disabled) {
+      background: var(--color-hover-overlay);
+      color: var(--color-ink-1);
+    }
+  }
+
+  // ── 变体：图标按钮（方形）──────────────────────────────────────────
+  &--icon {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: var(--color-ink-2);
+    border-radius: var(--radius-md);
+
+    &:hover:not(:disabled) {
+      background: var(--color-hover-overlay);
+      color: var(--color-ink-1);
+    }
+    &:active:not(:disabled) {
+      background: var(--color-active-overlay);
+    }
+  }
+
+  // ── 尺寸：小 ────────────────────────────────────────────────────────
+  &--sm {
+    padding: 6px var(--space-3);
+    font-size: var(--font-size-base);
+    min-height: 28px;
+  }
+
+  // ── 尺寸：大 ────────────────────────────────────────────────────────
+  &--lg {
+    padding: var(--space-2) var(--space-5);
+    font-size: var(--font-size-md);
+  }
+}

@@ -1,0 +1,38 @@
+.shortcut-modal {
+  &__cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-1) var(--space-6);
+  }
+
+  &__group {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: var(--space-4);
+  }
+
+  &__group-name {
+    font-family: var(--font-mono);
+    font-size: var(--font-size-xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-3);
+    margin-bottom: 6px;
+    border-bottom: 0.5px solid var(--color-border);
+    padding-bottom: var(--space-1);
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: 5px 0;
+  }
+
+  &__label {
+    font-size: var(--font-size-base);
+    color: var(--color-ink-1);
+    font-family: var(--font-sans);
+  }
+}
