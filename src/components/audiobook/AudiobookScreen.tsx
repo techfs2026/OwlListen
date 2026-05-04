@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useAudiobook } from "@/hooks/useAudiobook";
 import {
   getAudiobookCover,
@@ -28,7 +29,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [cover, setCover] = useState<AudiobookCover | null>(null);
-  const [coverReady, setCoverReady] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   // 删除最近书时本地立刻反映（hook 内部不持有最近书的删除逻辑，所以维护一份镜像）
   const [localRecent, setLocalRecent] = useState<RecentBook[]>([]);
@@ -37,6 +37,17 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   useEffect(() => { setLocalRecent(recentBooks); }, [recentBooks]);
 
   // ── 打开 / 拖入 ────────────────────────────────────────────────────────────
+
+  const openBookWithCover = useCallback(async (path: string) => {
+    setCover(null);
+    try {
+      await openBook(path);
+      const c = await getAudiobookCover(path);
+      setCover(c);
+    } catch (err) {
+      console.error("[audiobook] open failed:", err);
+    }
+  }, [openBook]);
 
   const handleOpenBook = useCallback(async () => {
     const path = await open({
@@ -47,19 +58,13 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
       ],
     });
     if (typeof path === "string") {
-      setCover(null);
-      setCoverReady(false);
-      await openBook(path);
-      getAudiobookCover(path).then(setCover).catch(() => {});
+      await openBookWithCover(path);
     }
   }, [openBook]);
 
   const handleOpenRecent = useCallback(async (book: RecentBook) => {
-    setCover(null);
-    setCoverReady(false);
-    await openBook(book.path);
-    getAudiobookCover(book.path).then(setCover).catch(() => {});
-  }, [openBook]);
+    await openBookWithCover(book.path);
+  }, [openBookWithCover]);
 
   const handleRemoveRecent = useCallback(async (book: RecentBook) => {
     // 乐观更新
@@ -73,21 +78,27 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     }
   }, []);
 
-  // TODO: Tauri v2 的拖拽要用 getCurrentWebview().onDragDropEvent
-  // 当前用 React onDrop 在 Tauri 里拿不到真实路径，留给后续修
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    const path = (file as unknown as { path?: string }).path;
-    if (!path) return;
-    setCover(null);
-    setCoverReady(false);
-    await openBook(path);
-    getAudiobookCover(path).then(setCover).catch(() => {});
-  }, [openBook]);
+  // ── Tauri 原生拖拽（拿到真实文件路径）─────────────────────────────────
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
 
-  useEffect(() => { setCoverReady(false); }, [cover]);
+    getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "drop") {
+          const paths = event.payload.paths;
+          if (!paths || paths.length === 0) return;
+          const path = paths[0];
+          // 简单后缀过滤，避免拖入图片/文档
+          if (!/\.(m4b|m4a|mp3|aac)$/i.test(path)) return;
+
+          openBookWithCover(path);
+        }
+      })
+      .then((fn) => { unlisten = fn; })
+      .catch((err) => { console.error("[audiobook] drag listener:", err); });
+
+    return () => { unlisten?.(); };
+  }, [openBook]);
 
   // ── 快捷键 ────────────────────────────────────────────────────────────────
 
@@ -113,13 +124,20 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [playState, play, pause, prevChapter, nextChapter, showHelp]);
 
-  const isLoading = playState === "loading";
+  // 延迟 200ms 显示加载弹窗，避免缓存命中时一闪而过
+  const [showLoadingModal, setShowLoadingModal] = useState(false);
+  useEffect(() => {
+    if (playState !== "loading") {
+      setShowLoadingModal(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowLoadingModal(true), 200);
+    return () => clearTimeout(timer);
+  }, [playState]);
 
   return (
     <div
       className="audiobook"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={handleDrop}
     >
       {/* ── 顶部工具栏 ─────────────────────────────────────────────────── */}
       <div className="audiobook__toolbar">
@@ -189,8 +207,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
                 totalChapters={meta.chapters.length}
                 playState={playState}
                 cover={cover}
-                coverReady={coverReady}
-                onCoverReady={() => setCoverReady(true)}
               />
             </div>
           </>
@@ -221,7 +237,7 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
 
       {showHelp && <ShortcutModal onClose={() => setShowHelp(false)} />}
 
-      {isLoading && (
+      {showLoadingModal && (
         <LoadingModal
           title="正在打开有声书"
           subtitle={meta?.title}

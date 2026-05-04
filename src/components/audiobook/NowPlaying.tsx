@@ -11,8 +11,6 @@ interface NowPlayingProps {
   totalChapters: number;
   playState: PlayState;
   cover: AudiobookCover | null;
-  coverReady: boolean;
-  onCoverReady: () => void;
 }
 
 function titleToGradient(title: string): string {
@@ -31,19 +29,26 @@ function titleToGradient(title: string): string {
 }
 
 export function NowPlaying({
-  meta, chapter, chapterIndex, totalChapters, playState,
-  cover, coverReady, onCoverReady,
+  meta, chapter, chapterIndex, totalChapters, playState, cover,
 }: NowPlayingProps) {
+  const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const gradient = titleToGradient(meta.title);
+
+  // 用 base64 数据本身作为标识，相同图片不重置（避免无谓闪烁）
+  const coverKey = cover?.data ?? "";
+
+  // cover 变化时重置加载状态
+  useEffect(() => {
+    setImgLoaded(false);
+    setImgError(false);
+  }, [coverKey]);
 
   const coverSrc = cover && !imgError
     ? `data:${cover.mimeType};base64,${cover.data}`
     : null;
 
-  useEffect(() => { setImgError(false); }, [cover]);
-
-  const showCover = coverSrc && coverReady;
+  const showCover = coverSrc && imgLoaded;
 
   return (
     <div className="now-playing">
@@ -53,12 +58,15 @@ export function NowPlaying({
       >
         {coverSrc && (
           <img
+            // key 强制 React 在 src 变化时重新挂载 <img>，
+            // 保证 onLoad 一定触发（即使 base64 已被浏览器缓存解码）
+            key={coverKey}
             src={coverSrc}
             alt={meta.title}
             className="now-playing__cover-img"
-            style={{ opacity: coverReady ? 1 : 0 }}
+            style={{ opacity: imgLoaded ? 1 : 0 }}
             draggable={false}
-            onLoad={onCoverReady}
+            onLoad={() => setImgLoaded(true)}
             onError={() => setImgError(true)}
           />
         )}
