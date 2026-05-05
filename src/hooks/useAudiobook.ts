@@ -11,6 +11,7 @@ import {
   playbackPause,
   playbackClose,
   playbackSeek,
+  playbackSetSpeed,
   type AudiobookMeta,
   type Chapter,
   type RecentBook,
@@ -87,7 +88,7 @@ export function useAudiobook(): UseAudiobookReturn {
     let unlisten: UnlistenFn | undefined;
     listen<{ chapterIndex: number }>("playback-chapter-ended", (event) => {
       console.log(`[audiobook] chapter ${event.payload.chapterIndex} ended`);
-      // 主动暂停后端，停止 cpal 时钟空转
+      // 主动暂停后端，停止音频时钟空转
       playbackPause().catch(() => { });
       setPlayState("paused");
     }).then((fn) => { unlisten = fn; });
@@ -178,7 +179,7 @@ export function useAudiobook(): UseAudiobookReturn {
 
   const setSpeed = useCallback((s: Speed) => {
     setSpeedState(s);
-    console.warn("[audiobook] setSpeed not yet implemented");
+    playbackSetSpeed(s).catch((e) => console.error("[audiobook] setSpeed:", e));
   }, []);
 
   // 卸载时关闭引擎

@@ -1,9 +1,44 @@
+/// playback.rs — macOS CoreAudio AudioUnit 后端
+///
+/// # 架构
+///
+/// ```text
+/// Tauri命令线程
+///     │  seek_in_chapter() → write_gen++ + seek_target
+///     │  play/pause        → AU start/stop
+///     ↓
+/// decode线程（FFmpeg）
+///     │  检测 seek_target → av_seek_frame → 重建 resampler
+///     │  push PCM帧到 SpscRing
+///     ↓
+/// SpscRing（自己实现的 lock-free SPSC ring buffer，mono f32）
+///     ↓
+/// CoreAudio render callback（系统音频线程）
+///     │  检测 read_gen != write_gen → drain ring → 切换 origin → 淡入
+///     │  正常 pop → 应用淡入包络 → 写入输出 buffer
+///     ↓
+/// 硬件输出
+/// ```
+///
+/// # 关于 ring buffer
+///
+/// 之前用 ringbuf crate 的 HeapCons/HeapProd 遇到了 Caching 视图缓存不同步的问题：
+/// consumer drain 后，producer 的 try_push 仍然返回 0，因为 Caching 视图不感知。
+/// 这里改用自己实现的简单 SPSC，所有同步通过共享原子量完成，drain 立即对另一端可见。
+///
+/// # seek 不爆音原理
+///
+/// seek 协议在 render callback 内部原子完成，不依赖跨线程握手：
+///
+/// 1. do_seek 写好 pending_origin_*，最后递增 write_gen（Release）
+/// 2. render callback 每次开头检查 read_gen vs write_gen：
+///    - 不同 → drain ring → 切换 origin → read_gen = write_gen → fade_mult = 0
+///    - 相同 → 正常消费
+/// 3. drain + 切换在同一次调用内完成，旧数据不会混入新数据
+
 use anyhow::{anyhow, Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ffmpeg_next as ffmpeg;
-use ringbuf::traits::{Consumer, Observer, Producer, Split};
-use ringbuf::{HeapCons, HeapProd, HeapRb};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -11,54 +46,151 @@ use tauri::{AppHandle, Emitter};
 
 use super::chapters::Chapter;
 
+// ── 常量 ──────────────────────────────────────────────────────────────────────
+
 const RING_SECONDS: f32 = 8.0;
 const PROGRESS_TICK_MS: u64 = 100;
+/// 淡入步长：每个采样增加 1/FADE_STEPS，48kHz 下约 42ms 升满
+const FADE_STEPS: f32 = 2000.0;
 
-/// 共享状态
+// ── SpscRing：单生产者单消费者无锁环形缓冲 ──────────────────────────────────
+
+/// 简单的 SPSC ring buffer，f32 元素。
+/// 索引使用单调递增 u64（不取模），位置 = idx % capacity。
+/// head 由 producer 推进，tail 由 consumer 推进，原子量同步，无内部缓存视图。
+struct SpscRing {
+    buf: Box<[std::cell::UnsafeCell<f32>]>,
+    capacity: usize,
+    head: AtomicU64,
+    tail: AtomicU64,
+}
+
+// SAFETY：SPSC 模式下，producer 和 consumer 各自只访问独占的索引区间，
+// 通过 head/tail 原子量同步。
+unsafe impl Sync for SpscRing {}
+unsafe impl Send for SpscRing {}
+
+impl SpscRing {
+    fn new(capacity: usize) -> Self {
+        let mut v = Vec::with_capacity(capacity);
+        for _ in 0..capacity {
+            v.push(std::cell::UnsafeCell::new(0.0));
+        }
+        Self {
+            buf: v.into_boxed_slice(),
+            capacity,
+            head: AtomicU64::new(0),
+            tail: AtomicU64::new(0),
+        }
+    }
+
+    fn occupied(&self) -> usize {
+        let h = self.head.load(Ordering::Acquire);
+        let t = self.tail.load(Ordering::Acquire);
+        h.saturating_sub(t) as usize
+    }
+
+    fn vacant(&self) -> usize {
+        self.capacity - self.occupied()
+    }
+
+    /// Producer 端：批量写入
+    fn push_slice(&self, data: &[f32]) -> usize {
+        let h = self.head.load(Ordering::Relaxed);
+        let t = self.tail.load(Ordering::Acquire);
+        let vacant = self.capacity - (h - t) as usize;
+        let n = data.len().min(vacant);
+        if n == 0 {
+            return 0;
+        }
+        for i in 0..n {
+            let idx = ((h + i as u64) % self.capacity as u64) as usize;
+            unsafe {
+                *self.buf[idx].get() = data[i];
+            }
+        }
+        self.head.store(h + n as u64, Ordering::Release);
+        n
+    }
+
+    /// Consumer 端：弹出一个
+    fn try_pop(&self) -> Option<f32> {
+        let t = self.tail.load(Ordering::Relaxed);
+        let h = self.head.load(Ordering::Acquire);
+        if t >= h {
+            return None;
+        }
+        let idx = (t % self.capacity as u64) as usize;
+        let val = unsafe { *self.buf[idx].get() };
+        self.tail.store(t + 1, Ordering::Release);
+        Some(val)
+    }
+
+    /// Consumer 端：清空
+    fn clear(&self) {
+        let h = self.head.load(Ordering::Acquire);
+        self.tail.store(h, Ordering::Release);
+    }
+}
+
+// ── 共享状态 ──────────────────────────────────────────────────────────────────
+
 struct Shared {
+    ring: SpscRing,
+
+    // 进度计数（独立于 ring 的 head/tail，因为要排除 drain 的部分）
     popped_total: AtomicU64,
     pushed_total: AtomicU64,
-    /// 当前 origin 对应的 popped_total 基准值
-    /// played_since_origin = popped_total - origin_popped_baseline
-    origin_popped_baseline: AtomicU64,
-    decode_origin_sec: Mutex<f64>,
-    /// do_seek 写入目标秒数，cpal flush 时取出并原子性地切换 decode_origin_sec
+    origin_baseline: AtomicU64,
+    origin_sec: Mutex<f64>,
+
+    // seek / generation 协议
+    write_gen: AtomicU32,
+    read_gen: AtomicU32,
+    seek_target: Mutex<Option<f64>>,
     pending_origin_sec: Mutex<Option<f64>>,
-    seek_request: Mutex<Option<f64>>,
+    pending_origin_baseline: AtomicU64,
+
+    // 控制
     should_exit: AtomicBool,
-    /// do_seek 置 true → cpal 回调执行 flush 动作
-    flushing_ring: AtomicBool,
-    /// cpal flush 完成后置 true → push_samples 第一次成功写入后清 false
-    /// flushing=true 期间 cpal 正常 pop 但不推进 popped_total（屏蔽进度）
-    flushing: AtomicBool,
     playing: AtomicBool,
+
+    // decode 唤醒
     wake: (Mutex<bool>, Condvar),
+
+    // 章节
     chapter_decode_done: AtomicBool,
     current_chapter_idx: AtomicUsize,
     current_chapter_end_sec: Mutex<f64>,
+
+    // 变速
+    speed_bits: AtomicU32,
 }
 
 impl Shared {
     fn wake_decoder(&self) {
         let (lock, cvar) = &self.wake;
-        let mut woken = lock.lock().unwrap();
-        *woken = true;
+        let mut w = lock.lock().unwrap();
+        *w = true;
         cvar.notify_one();
     }
 
-    fn ring_occupied(&self) -> u64 {
-        self.pushed_total
-            .load(Ordering::Acquire)
-            .saturating_sub(self.popped_total.load(Ordering::Acquire))
+    #[allow(dead_code)]
+    fn speed(&self) -> f32 {
+        f32::from_bits(self.speed_bits.load(Ordering::Relaxed))
     }
 }
+
+// ── PlaybackEngine ────────────────────────────────────────────────────────────
 
 pub struct PlaybackEngine {
     shared: Arc<Shared>,
     chapters: Arc<Vec<Chapter>>,
     output_sample_rate: u32,
 
-    _stream: cpal::Stream,
+    #[cfg(target_os = "macos")]
+    audio_unit: core_audio::OutputUnit,
+
     decode_handle: Option<JoinHandle<()>>,
     progress_handle: Option<JoinHandle<()>>,
 }
@@ -74,62 +206,44 @@ impl PlaybackEngine {
         ffmpeg::init().context("FFmpeg init")?;
 
         let chapter_idx = chapter_index.min(chapters.len().saturating_sub(1));
-        let absolute_start_sec = chapters[chapter_idx].start_sec + position_sec;
+        let abs_start = chapters[chapter_idx].start_sec + position_sec.max(0.0);
 
-        // ── cpal 输出 ─────────────────────────────────────────────────────────
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or_else(|| anyhow!("No output device"))?;
-        let supported = device
-            .default_output_config()
-            .context("default_output_config")?;
-        let output_sample_rate: u32 = supported.sample_rate().into();
-        let output_channels = supported.channels();
+        #[cfg(target_os = "macos")]
+        let output_sample_rate = core_audio::default_output_sample_rate().unwrap_or(48000);
+        #[cfg(not(target_os = "macos"))]
+        let output_sample_rate: u32 = 48000;
 
-        log::info!(
-            "PlaybackEngine: rate={} channels={}",
-            output_sample_rate,
-            output_channels
-        );
+        log::info!("PlaybackEngine: rate={output_sample_rate}");
 
-        // ── shared ────────────────────────────────────────────────────────────
+        let cap = (output_sample_rate as f32 * RING_SECONDS) as usize;
         let shared = Arc::new(Shared {
+            ring: SpscRing::new(cap),
             popped_total: AtomicU64::new(0),
             pushed_total: AtomicU64::new(0),
-            origin_popped_baseline: AtomicU64::new(0),
-            decode_origin_sec: Mutex::new(absolute_start_sec),
+            origin_baseline: AtomicU64::new(0),
+            origin_sec: Mutex::new(abs_start),
+            write_gen: AtomicU32::new(0),
+            read_gen: AtomicU32::new(0),
+            seek_target: Mutex::new(None),
             pending_origin_sec: Mutex::new(None),
-            seek_request: Mutex::new(None),
-            flushing_ring: AtomicBool::new(false),
-            flushing: AtomicBool::new(false),
+            pending_origin_baseline: AtomicU64::new(0),
             should_exit: AtomicBool::new(false),
             playing: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             chapter_decode_done: AtomicBool::new(false),
             current_chapter_idx: AtomicUsize::new(chapter_idx),
             current_chapter_end_sec: Mutex::new(chapters[chapter_idx].end_sec),
+            speed_bits: AtomicU32::new(1.0f32.to_bits()),
         });
 
-        // ── ring buffer ───────────────────────────────────────────────────────
-        let cap = (output_sample_rate as f32 * RING_SECONDS) as usize;
-        let rb = HeapRb::<f32>::new(cap);
-        let (producer, consumer) = rb.split();
+        #[cfg(target_os = "macos")]
+        let audio_unit = core_audio::build_output_unit(shared.clone(), output_sample_rate)
+            .context("CoreAudio build_output_unit")?;
 
-        // ── cpal stream ───────────────────────────────────────────────────────
-        let stream = build_stream(
-            &device,
-            &supported.config(),
-            output_channels,
-            consumer,
-            shared.clone(),
-        )?;
-        stream.pause().ok();
-
-        // ── 解码线程 ──────────────────────────────────────────────────────────
-        let decode_path = path.to_string();
+        let chapters_arc = Arc::new(chapters);
         let decode_shared = shared.clone();
-        let decode_chapters = chapters.clone();
+        let decode_chapters = chapters_arc.clone();
+        let decode_path = path.to_string();
         let decode_handle = thread::Builder::new()
             .name("audiobook-decode".into())
             .spawn(move || {
@@ -137,9 +251,8 @@ impl PlaybackEngine {
                     decode_path,
                     decode_chapters,
                     chapter_idx,
-                    absolute_start_sec,
+                    abs_start,
                     output_sample_rate,
-                    producer,
                     decode_shared,
                 ) {
                     log::error!("decode thread: {e:?}");
@@ -147,20 +260,12 @@ impl PlaybackEngine {
             })
             .context("spawn decode thread")?;
 
-        // ── 进度推送线程 ──────────────────────────────────────────────────────
-        let chapters_arc = Arc::new(chapters);
-        let progress_app = app.clone();
-        let progress_chapters = chapters_arc.clone();
         let progress_shared = shared.clone();
+        let progress_chapters = chapters_arc.clone();
         let progress_handle = thread::Builder::new()
             .name("audiobook-progress".into())
             .spawn(move || {
-                progress_loop(
-                    progress_app,
-                    progress_chapters,
-                    progress_shared,
-                    output_sample_rate,
-                );
+                progress_loop(app, progress_chapters, progress_shared, output_sample_rate);
             })
             .context("spawn progress thread")?;
 
@@ -168,69 +273,64 @@ impl PlaybackEngine {
             shared,
             chapters: chapters_arc,
             output_sample_rate,
-            _stream: stream,
+            #[cfg(target_os = "macos")]
+            audio_unit,
             decode_handle: Some(decode_handle),
             progress_handle: Some(progress_handle),
         })
     }
 
     pub fn play(&self) -> Result<()> {
-        self._stream.play().map_err(|e| anyhow!("play: {e}"))?;
+        log::info!("PlaybackEngine::play()");
+        #[cfg(target_os = "macos")]
+        self.audio_unit.start().map_err(|e| anyhow!("AU start: {e}"))?;
         self.shared.playing.store(true, Ordering::Release);
         self.shared.wake_decoder();
         Ok(())
     }
 
     pub fn pause(&self) -> Result<()> {
-        self._stream.pause().map_err(|e| anyhow!("pause: {e}"))?;
+        log::info!("PlaybackEngine::pause()");
+        #[cfg(target_os = "macos")]
+        self.audio_unit.stop().map_err(|e| anyhow!("AU stop: {e}"))?;
         self.shared.playing.store(false, Ordering::Release);
         Ok(())
     }
 
-    /// 跳转到指定章节内某秒。
+    pub fn set_speed(&self, speed: f32) -> Result<()> {
+        let clamped = speed.clamp(0.25, 4.0);
+        self.shared.speed_bits.store(clamped.to_bits(), Ordering::Relaxed);
+        self.shared.wake_decoder();
+        Ok(())
+    }
+
     pub fn seek_in_chapter(&self, chapter_index: usize, position_sec: f64) -> Result<()> {
         let ch = self
             .chapters
             .get(chapter_index)
-            .ok_or_else(|| anyhow!("invalid chapter index"))?;
-        let abs = ch.start_sec + position_sec.max(0.0);
-        let abs = abs.min(ch.end_sec.max(ch.start_sec));
+            .ok_or_else(|| anyhow!("invalid chapter index {chapter_index}"))?;
+        let abs = (ch.start_sec + position_sec.max(0.0)).min(ch.end_sec.max(ch.start_sec));
         self.do_seek(abs, chapter_index, ch.end_sec)
     }
 
     fn do_seek(&self, abs_sec: f64, chapter_idx: usize, chapter_end: f64) -> Result<()> {
         let s = &self.shared;
 
-        if s.playing.load(Ordering::Acquire) {
-            // ── 播放中：交给 cpal 回调在下一个 callback 里执行 flush ──────────
-            // cpal 回调会：清空 ring → 更新 popped_total → 锁定 baseline →
-            //              取出 pending_origin_sec 写入 decode_origin_sec → 置 flushing=true
-            *s.pending_origin_sec.lock().unwrap() = Some(abs_sec);
-            s.flushing_ring.store(true, Ordering::Release);
-        } else {
-            // ── 暂停中：cpal 回调不跑，直接在主线程完成 flush ────────────────
-            // 此时解码线程在 park，ring 不会有新数据写入，直接操作是安全的。
-            // 注意：ring 的 consumer 在 cpal 回调闭包里，这里无法直接清空，
-            // 改为把 pushed_total 拉平到 popped_total，让 ring_occupied() == 0，
-            // 并把 flushing_ring 置 true，等 play() 触发第一个 cpal callback 时再真正清空。
-            // 但 origin/baseline 必须现在就更新，否则 progress_loop 在 paused 期间会显示旧位置。
-            *s.decode_origin_sec.lock().unwrap() = abs_sec;
-            let cur_popped = s.popped_total.load(Ordering::Acquire);
-            s.origin_popped_baseline.store(cur_popped, Ordering::Release);
-            // 让 ring_occupied() 看起来为 0（解码线程不会在 park 时 push）
-            s.pushed_total.store(cur_popped, Ordering::Release);
-            // 仍然设 flushing_ring，play() 后第一个 callback 会真正清空 ring 里残留的旧数据
-            s.flushing_ring.store(true, Ordering::Release);
-            s.flushing.store(true, Ordering::Release);
-        }
+        *s.seek_target.lock().unwrap() = Some(abs_sec);
 
-        // 通知解码线程
-        *s.seek_request.lock().unwrap() = Some(abs_sec);
+        let cur_popped = s.popped_total.load(Ordering::Acquire);
+        s.pending_origin_baseline.store(cur_popped, Ordering::Relaxed);
+        *s.pending_origin_sec.lock().unwrap() = Some(abs_sec);
+
+        s.write_gen.fetch_add(1, Ordering::Release);
+
         s.current_chapter_idx.store(chapter_idx, Ordering::Release);
         *s.current_chapter_end_sec.lock().unwrap() = chapter_end;
         s.chapter_decode_done.store(false, Ordering::Release);
+
         s.wake_decoder();
 
+        log::debug!("do_seek: {abs_sec:.2}s chapter={chapter_idx}");
         Ok(())
     }
 }
@@ -240,99 +340,287 @@ impl Drop for PlaybackEngine {
         self.shared.should_exit.store(true, Ordering::Release);
         self.shared.playing.store(false, Ordering::Release);
         self.shared.wake_decoder();
+        #[cfg(target_os = "macos")]
+        let _ = self.audio_unit.stop();
         if let Some(h) = self.decode_handle.take() {
             let _ = h.join();
         }
         if let Some(h) = self.progress_handle.take() {
             let _ = h.join();
         }
+        log::info!("PlaybackEngine dropped");
     }
 }
 
-// ── cpal 回调 ─────────────────────────────────────────────────────────────────
-fn build_stream(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
-    out_channels: u16,
-    mut consumer: HeapCons<f32>,
-    shared: Arc<Shared>,
-) -> Result<cpal::Stream> {
-    let channels = out_channels as usize;
-    let stream = device
-        .build_output_stream(
-            config,
-            move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let frames = out.len() / channels;
+// ── CoreAudio 封装（仅 macOS）────────────────────────────────────────────────
 
-                // ── 1. seek flush ────────────────────────────────────────────
-                // 清空 ring，并在同一个 callback 内原子性地切换 origin 和 baseline，
-                // 确保 progress_loop 读到的两个值永远是同一个 seek 的配对。
-                if shared.flushing_ring.swap(false, Ordering::AcqRel) {
-                    let mut discarded = 0u64;
-                    while consumer.try_pop().is_some() {
-                        discarded += 1;
-                    }
-                    // discarded 按实际从 ring 弹出的 f32 数计（与 push_samples 单位一致）
-                    shared.popped_total.fetch_add(discarded, Ordering::Relaxed);
+#[cfg(target_os = "macos")]
+mod core_audio {
+    use super::{Shared, FADE_STEPS};
+    use anyhow::{anyhow, Result};
+    use coreaudio_sys::*;
+    use std::mem;
+    use std::os::raw::c_void;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
 
-                    // baseline 锁定：ring 清空后此刻的 popped_total 就是新的零点
-                    let new_baseline = shared.popped_total.load(Ordering::Relaxed);
-                    shared
-                        .origin_popped_baseline
-                        .store(new_baseline, Ordering::Relaxed);
+    struct RenderCtx {
+        shared: Arc<Shared>,
+        fade_mult: f32,
+        prev_sample: f32,
+    }
 
-                    // 同步切换 decode_origin_sec（由 do_seek 通过 pending_origin_sec 传来）
-                    if let Some(origin) = shared.pending_origin_sec.lock().unwrap().take() {
-                        *shared.decode_origin_sec.lock().unwrap() = origin;
-                    }
+    unsafe extern "C" fn render_cb(
+        in_ref_con: *mut c_void,
+        _flags: *mut AudioUnitRenderActionFlags,
+        _ts: *const AudioTimeStamp,
+        _bus: u32,
+        n_frames: u32,
+        io_data: *mut AudioBufferList,
+    ) -> OSStatus {
+        let ctx = &mut *(in_ref_con as *mut RenderCtx);
+        let frames = n_frames as usize;
+        let shared = &ctx.shared;
 
-                    // 通知 pop 段：ring 已空，等新数据进来再开始推进进度
-                    shared.flushing.store(true, Ordering::Release);
+        // gen 切换
+        let write_gen = shared.write_gen.load(Ordering::Acquire);
+        if shared.read_gen.load(Ordering::Relaxed) != write_gen {
+            shared.ring.clear();
 
-                    log::debug!(
-                        "cpal flush done: discarded={} new_baseline={}",
-                        discarded,
-                        new_baseline
-                    );
-                }
+            let new_baseline = shared.pending_origin_baseline.load(Ordering::Acquire);
+            shared.origin_baseline.store(new_baseline, Ordering::Release);
 
-                // ── 2. 正常填 out ────────────────────────────────────────────
-                // flushing=true 期间输出静音（ring 为空 try_pop 返回 None → 0.0），
-                // 但不推进 popped_total，避免进度在新数据到来前乱跳。
-                let is_flushing = shared.flushing.load(Ordering::Acquire);
-                let mut filled = 0u64;
-                for fi in 0..frames {
-                    // ring 里存的是单声道 f32，每次 pop 一个，复制到所有输出声道
-                    let s = consumer.try_pop().unwrap_or(0.0);
-                    for ch in 0..channels {
-                        out[fi * channels + ch] = s;
-                    }
-                    // 只计实际从 ring 弹出的逻辑采样数（不乘 channels）
-                    if !is_flushing {
-                        filled += 1;
+            if let Ok(mut guard) = shared.pending_origin_sec.try_lock() {
+                if let Some(sec) = guard.take() {
+                    if let Ok(mut orig) = shared.origin_sec.try_lock() {
+                        *orig = sec;
                     }
                 }
-                shared.popped_total.fetch_add(filled, Ordering::Relaxed);
-                shared.wake_decoder();
-            },
-            |err| log::error!("cpal stream: {err}"),
-            None,
-        )
-        .context("build_output_stream")?;
-    Ok(stream)
+            }
+
+            shared.read_gen.store(write_gen, Ordering::Release);
+
+            ctx.fade_mult = 0.0;
+            ctx.prev_sample = 0.0;
+
+            log::debug!("render: gen→{write_gen}");
+        }
+
+        // 输出 buffer（裸指针偏移避免数组越界）
+        let buf_list = &*io_data;
+        let n_bufs = buf_list.mNumberBuffers as usize;
+        if n_bufs == 0 {
+            return 0;
+        }
+        let buffers_base = buf_list.mBuffers.as_ptr();
+
+        let buf0_meta = &*buffers_base;
+        let buf0 = std::slice::from_raw_parts_mut(buf0_meta.mData as *mut f32, frames);
+
+        let mut extra: Vec<&mut [f32]> = (1..n_bufs)
+            .filter_map(|i| {
+                let buf_meta = &*buffers_base.add(i);
+                let ptr = buf_meta.mData as *mut f32;
+                if ptr.is_null() {
+                    None
+                } else {
+                    Some(std::slice::from_raw_parts_mut(ptr, frames))
+                }
+            })
+            .collect();
+
+        let mut popped = 0u64;
+
+        for i in 0..frames {
+            let s = if let Some(val) = shared.ring.try_pop() {
+                if ctx.fade_mult < 1.0 {
+                    ctx.fade_mult = (ctx.fade_mult + 1.0 / FADE_STEPS).min(1.0);
+                }
+                let out = val * ctx.fade_mult;
+                ctx.prev_sample = out;
+                popped += 1;
+                out
+            } else {
+                ctx.fade_mult = 0.0;
+                ctx.prev_sample *= 0.95;
+                if ctx.prev_sample.abs() < 1e-5 {
+                    ctx.prev_sample = 0.0;
+                }
+                ctx.prev_sample
+            };
+
+            buf0[i] = s;
+            for ch in extra.iter_mut() {
+                ch[i] = s;
+            }
+        }
+
+        shared.popped_total.fetch_add(popped, Ordering::Relaxed);
+        shared.wake_decoder();
+
+        0
+    }
+
+    pub fn default_output_sample_rate() -> Result<u32> {
+        unsafe {
+            let desc = AudioComponentDescription {
+                componentType: kAudioUnitType_Output,
+                componentSubType: kAudioUnitSubType_DefaultOutput,
+                componentManufacturer: kAudioUnitManufacturer_Apple,
+                componentFlags: 0,
+                componentFlagsMask: 0,
+            };
+            let comp = AudioComponentFindNext(std::ptr::null_mut(), &desc);
+            if comp.is_null() {
+                return Ok(48000);
+            }
+            let mut unit: AudioUnit = std::ptr::null_mut();
+            if AudioComponentInstanceNew(comp, &mut unit) != 0 {
+                return Ok(48000);
+            }
+            let mut rate: f64 = 48000.0;
+            let mut size = mem::size_of::<f64>() as u32;
+            AudioUnitGetProperty(
+                unit,
+                kAudioUnitProperty_SampleRate,
+                kAudioUnitScope_Output,
+                0,
+                &mut rate as *mut f64 as *mut c_void,
+                &mut size,
+            );
+            AudioComponentInstanceDispose(unit);
+            Ok(rate as u32)
+        }
+    }
+
+    pub struct OutputUnit {
+        unit: AudioUnit,
+        _ctx: *mut RenderCtx,
+    }
+
+    impl Drop for OutputUnit {
+        fn drop(&mut self) {
+            unsafe {
+                AudioOutputUnitStop(self.unit);
+                AudioUnitUninitialize(self.unit);
+                AudioComponentInstanceDispose(self.unit);
+                drop(Box::from_raw(self._ctx));
+            }
+        }
+    }
+
+    unsafe impl Send for OutputUnit {}
+    unsafe impl Sync for OutputUnit {}
+
+    impl OutputUnit {
+        pub fn start(&self) -> Result<()> {
+            let ret = unsafe { AudioOutputUnitStart(self.unit) };
+            if ret != 0 { Err(anyhow!("AudioOutputUnitStart: {ret}")) } else { Ok(()) }
+        }
+
+        pub fn stop(&self) -> Result<()> {
+            let ret = unsafe { AudioOutputUnitStop(self.unit) };
+            if ret != 0 { Err(anyhow!("AudioOutputUnitStop: {ret}")) } else { Ok(()) }
+        }
+    }
+
+    pub fn build_output_unit(shared: Arc<Shared>, output_sample_rate: u32) -> Result<OutputUnit> {
+        unsafe {
+            let desc = AudioComponentDescription {
+                componentType: kAudioUnitType_Output,
+                componentSubType: kAudioUnitSubType_DefaultOutput,
+                componentManufacturer: kAudioUnitManufacturer_Apple,
+                componentFlags: 0,
+                componentFlagsMask: 0,
+            };
+            let comp = AudioComponentFindNext(std::ptr::null_mut(), &desc);
+            if comp.is_null() {
+                return Err(anyhow!("AudioComponentFindNext: DefaultOutput not found"));
+            }
+
+            let mut unit: AudioUnit = std::ptr::null_mut();
+            let ret = AudioComponentInstanceNew(comp, &mut unit);
+            if ret != 0 {
+                return Err(anyhow!("AudioComponentInstanceNew: {ret}"));
+            }
+
+            let format = AudioStreamBasicDescription {
+                mSampleRate: output_sample_rate as f64,
+                mFormatID: kAudioFormatLinearPCM,
+                mFormatFlags: kAudioFormatFlagIsFloat
+                    | kAudioFormatFlagIsNonInterleaved
+                    | kAudioFormatFlagIsPacked,
+                mBitsPerChannel: 32,
+                mChannelsPerFrame: 2,
+                mFramesPerPacket: 1,
+                mBytesPerFrame: 4,
+                mBytesPerPacket: 4,
+                mReserved: 0,
+            };
+            let ret = AudioUnitSetProperty(
+                unit,
+                kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Input,
+                0,
+                &format as *const _ as *const c_void,
+                mem::size_of::<AudioStreamBasicDescription>() as u32,
+            );
+            if ret != 0 {
+                AudioComponentInstanceDispose(unit);
+                return Err(anyhow!("SetProperty StreamFormat: {ret}"));
+            }
+
+            let ctx = Box::new(RenderCtx {
+                shared,
+                fade_mult: 0.0,
+                prev_sample: 0.0,
+            });
+            let ctx_ptr = Box::into_raw(ctx);
+
+            let callback = AURenderCallbackStruct {
+                inputProc: Some(render_cb),
+                inputProcRefCon: ctx_ptr as *mut c_void,
+            };
+            let ret = AudioUnitSetProperty(
+                unit,
+                kAudioUnitProperty_SetRenderCallback,
+                kAudioUnitScope_Input,
+                0,
+                &callback as *const _ as *const c_void,
+                mem::size_of::<AURenderCallbackStruct>() as u32,
+            );
+            if ret != 0 {
+                drop(Box::from_raw(ctx_ptr));
+                AudioComponentInstanceDispose(unit);
+                return Err(anyhow!("SetProperty RenderCallback: {ret}"));
+            }
+
+            let ret = AudioUnitInitialize(unit);
+            if ret != 0 {
+                drop(Box::from_raw(ctx_ptr));
+                AudioComponentInstanceDispose(unit);
+                return Err(anyhow!("AudioUnitInitialize: {ret}"));
+            }
+
+            log::info!("CoreAudio OutputUnit ready, rate={output_sample_rate}");
+            Ok(OutputUnit { unit, _ctx: ctx_ptr })
+        }
+    }
 }
+
+// ── decode 线程 ───────────────────────────────────────────────────────────────
 
 fn decode_loop(
     path: String,
-    chapters: Vec<Chapter>,
+    chapters: Arc<Vec<Chapter>>,
     initial_chapter_idx: usize,
     initial_seek_sec: f64,
     output_rate: u32,
-    mut producer: HeapProd<f32>,
     shared: Arc<Shared>,
 ) -> Result<()> {
     let mut ictx = ffmpeg::format::input(&path).with_context(|| format!("open: {path}"))?;
-    let stream_info = {
+
+    let (stream_index, stream_tb_f, mut decoder, src_format, src_rate, src_layout) = {
         let s = ictx
             .streams()
             .best(ffmpeg::media::Type::Audio)
@@ -341,134 +629,80 @@ fn decode_loop(
         let tb = s.time_base();
         let tb_f = tb.numerator() as f64 / tb.denominator() as f64;
         let codec_ctx = ffmpeg::codec::Context::from_parameters(s.parameters())?;
-        let decoder = codec_ctx.decoder().audio()?;
-        let src_format = match decoder.format() {
+        let dec = codec_ctx.decoder().audio()?;
+        let fmt = match dec.format() {
             ffmpeg::format::Sample::None => {
                 ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Planar)
             }
             f => f,
         };
-        let src_rate = if decoder.rate() > 0 {
-            decoder.rate()
-        } else {
-            48000
-        };
-        let (src_layout, _) = resolve_layout(&decoder, &ictx, idx);
-        (idx, tb_f, decoder, src_format, src_rate, src_layout)
+        let rate = if dec.rate() > 0 { dec.rate() } else { 48000 };
+        let (layout, _) = resolve_layout(&dec, &ictx, idx);
+        (idx, tb_f, dec, fmt, rate, layout)
     };
-    let (stream_index, stream_tb_f, mut decoder, src_format, src_rate, src_layout) = stream_info;
 
-    let mut resampler = ffmpeg::software::resampling::Context::get(
-        src_format,
-        src_layout,
-        src_rate,
-        ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Planar),
-        ffmpeg::channel_layout::ChannelLayout::MONO,
-        output_rate,
-    )?;
+    let mut resampler = make_resampler(src_format, src_layout, src_rate, output_rate)?;
 
-    // 初始 seek
-    let mut current_chapter_idx = initial_chapter_idx;
     let mut current_chapter_end = chapters[initial_chapter_idx].end_sec;
-    seek_to(
-        &mut ictx,
-        &mut decoder,
-        stream_index,
-        stream_tb_f,
-        initial_seek_sec,
-    )?;
-    // 初始化时直接写（此时 cpal stream 还未 play，无竞态）
-    *shared.decode_origin_sec.lock().unwrap() = initial_seek_sec;
-    shared.popped_total.store(0, Ordering::Release);
-    shared.pushed_total.store(0, Ordering::Release);
-    shared.origin_popped_baseline.store(0, Ordering::Release);
+    seek_to(&mut ictx, &mut decoder, stream_index, stream_tb_f, initial_seek_sec)?;
 
     let mut decoded = ffmpeg::frame::Audio::empty();
     let mut resampled = ffmpeg::frame::Audio::empty();
-    let mut last_decode_pos_sec = initial_seek_sec;
-    let mut skip_until_sec: Option<f64> = None;
+    let mut last_pos_sec = initial_seek_sec;
+    let mut skip_until: Option<f64> = Some(initial_seek_sec);
 
     'main: loop {
         if shared.should_exit.load(Ordering::Acquire) {
             break;
         }
 
-        // ── 1. 处理 seek 请求 ────────────────────────────────────────────────
-        let pending_seek = shared.seek_request.lock().unwrap().take();
-        if let Some(target) = pending_seek {
+        let pending = shared.seek_target.lock().unwrap().take();
+        if let Some(target) = pending {
             seek_to(&mut ictx, &mut decoder, stream_index, stream_tb_f, target)?;
-
-            // AAC/M4B：seek 后 resampler 内部仍缓存着旧数据，必须重建。
-            // 否则 resampler 会在新帧之前吐出一批旧数据混入 ring，造成听到旧章节内容。
-            resampler = ffmpeg::software::resampling::Context::get(
-                src_format,
-                src_layout,
-                src_rate,
-                ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Planar),
-                ffmpeg::channel_layout::ChannelLayout::MONO,
-                output_rate,
-            )?;
-
-            // decode_origin_sec / baseline 由 cpal flush 回调（或 do_seek 暂停分支）负责更新
-            current_chapter_idx = shared.current_chapter_idx.load(Ordering::Acquire);
+            resampler = make_resampler(src_format, src_layout, src_rate, output_rate)?;
             current_chapter_end = *shared.current_chapter_end_sec.lock().unwrap();
             shared.chapter_decode_done.store(false, Ordering::Release);
-            last_decode_pos_sec = target;
-            // AAC GOP 对齐：seek 会落到目标前的关键帧，skip_until_sec 丢弃目标前的帧
-            skip_until_sec = Some(target);
-            log::debug!("decode seek: target={:.2}s", target);
+            last_pos_sec = target;
+            skip_until = Some(target);
+            log::debug!("decode seek: {target:.2}s");
             continue 'main;
         }
 
-        // ── 2. 章节结束检测 ──────────────────────────────────────────────────
-        if last_decode_pos_sec >= current_chapter_end {
+        if last_pos_sec >= current_chapter_end {
             shared.chapter_decode_done.store(true, Ordering::Release);
             park_decoder(&shared);
             continue 'main;
         }
 
-        // ── 3. ring 满 → park ────────────────────────────────────────────────
-        let occupied = shared.ring_occupied() as usize;
-        let cap = producer.capacity().get();
-        if cap - occupied < output_rate as usize / 8 {
+        if shared.ring.vacant() < (output_rate as usize / 8) {
             park_decoder(&shared);
             continue 'main;
         }
 
-        // ── 4. 解一帧 ────────────────────────────────────────────────────────
         match decoder.receive_frame(&mut decoded) {
             Ok(_) => {
-                let mut frame_sec = last_decode_pos_sec;
                 if let Some(pts) = decoded.pts() {
-                    frame_sec = pts as f64 * stream_tb_f;
-                    last_decode_pos_sec = frame_sec;
+                    last_pos_sec = pts as f64 * stream_tb_f;
                 }
-
-                if let Some(target_sec) = skip_until_sec {
-                    // AAC 的 pts 在 seek 后前几帧可能是 None 或不准确。
-                    // 策略：pts 已知时，pts < target 的帧全丢；
-                    //        pts 为 None 时，用 last_decode_pos_sec 兜底继续丢。
-                    // 一旦 pts >= target，认为已到达正确位置，清除标记并放行。
-                    let effective_sec = decoded.pts()
+                if let Some(target) = skip_until {
+                    let eff = decoded
+                        .pts()
                         .map(|p| p as f64 * stream_tb_f)
-                        .unwrap_or(last_decode_pos_sec);
-                    if effective_sec < target_sec {
+                        .unwrap_or(last_pos_sec);
+                    if eff < target {
                         continue 'main;
                     }
-                    skip_until_sec = None;
+                    skip_until = None;
                 }
-
                 resampler.run(&decoded, &mut resampled)?;
-                push_samples(&resampled, &mut producer, &shared)?;
+                push_samples(&resampled, &shared)?;
             }
-            Err(ffmpeg::Error::Other {
-                errno: ffmpeg::error::EAGAIN,
-            }) => {
+            Err(ffmpeg::Error::Other { errno: ffmpeg::error::EAGAIN }) => {
                 if !feed_one_packet(&mut ictx, &mut decoder, stream_index)? {
                     decoder.send_eof().ok();
                     while decoder.receive_frame(&mut decoded).is_ok() {
                         resampler.run(&decoded, &mut resampled)?;
-                        push_samples(&resampled, &mut producer, &shared)?;
+                        push_samples(&resampled, &shared)?;
                     }
                     shared.chapter_decode_done.store(true, Ordering::Release);
                     park_decoder(&shared);
@@ -481,35 +715,40 @@ fn decode_loop(
             Err(e) => return Err(anyhow!(e)),
         }
     }
+
     log::info!("decode thread exited");
     Ok(())
 }
 
-/// 喂一个 packet，返回 false 表示 EOF
-fn feed_one_packet(
-    ictx: &mut ffmpeg::format::context::Input,
-    decoder: &mut ffmpeg::decoder::Audio,
-    stream_index: usize,
-) -> Result<bool> {
-    for (s, p) in ictx.packets() {
-        if s.index() == stream_index {
-            decoder.send_packet(&p).ok();
-            return Ok(true);
-        }
-    }
-    Ok(false)
+// ── 辅助 ──────────────────────────────────────────────────────────────────────
+
+fn make_resampler(
+    src_fmt: ffmpeg::format::Sample,
+    src_layout: ffmpeg::channel_layout::ChannelLayout,
+    src_rate: u32,
+    dst_rate: u32,
+) -> Result<ffmpeg::software::resampling::Context> {
+    ffmpeg::software::resampling::Context::get(
+        src_fmt,
+        src_layout,
+        src_rate,
+        ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Planar),
+        ffmpeg::channel_layout::ChannelLayout::MONO,
+        dst_rate,
+    )
+    .map_err(|e| anyhow!("resampler: {e}"))
 }
 
 fn seek_to(
     ictx: &mut ffmpeg::format::context::Input,
     decoder: &mut ffmpeg::decoder::Audio,
     stream_index: usize,
-    stream_tb_f: f64,
+    tb_f: f64,
     sec: f64,
 ) -> Result<()> {
     use ffmpeg::ffi;
     use std::os::raw::c_int;
-    let ts = (sec / stream_tb_f) as i64;
+    let ts = (sec / tb_f) as i64;
     unsafe {
         let ret = ffi::av_seek_frame(
             ictx.as_mut_ptr(),
@@ -525,26 +764,21 @@ fn seek_to(
     Ok(())
 }
 
-fn park_decoder(shared: &Arc<Shared>) {
-    let (lock, cvar) = &shared.wake;
-    let mut woken = lock.lock().unwrap();
-    while !*woken && !shared.should_exit.load(Ordering::Acquire) {
-        let r = cvar
-            .wait_timeout(woken, Duration::from_millis(200))
-            .unwrap();
-        woken = r.0;
-        if r.1.timed_out() {
-            break;
+fn feed_one_packet(
+    ictx: &mut ffmpeg::format::context::Input,
+    decoder: &mut ffmpeg::decoder::Audio,
+    stream_index: usize,
+) -> Result<bool> {
+    for (s, p) in ictx.packets() {
+        if s.index() == stream_index {
+            decoder.send_packet(&p).ok();
+            return Ok(true);
         }
     }
-    *woken = false;
+    Ok(false)
 }
 
-fn push_samples(
-    frame: &ffmpeg::frame::Audio,
-    producer: &mut HeapProd<f32>,
-    shared: &Arc<Shared>,
-) -> Result<()> {
+fn push_samples(frame: &ffmpeg::frame::Audio, shared: &Arc<Shared>) -> Result<()> {
     let n = frame.samples();
     if n == 0 {
         return Ok(());
@@ -557,27 +791,34 @@ fn push_samples(
         if shared.should_exit.load(Ordering::Acquire) {
             return Ok(());
         }
-        // seek 来了就放弃当前 frame，回到主循环处理新的 seek_request
-        if shared.seek_request.lock().unwrap().is_some() {
+        if shared.seek_target.lock().unwrap().is_some() {
             return Ok(());
         }
-        let pushed = producer.push_slice(&slice[written..]);
+        let pushed = shared.ring.push_slice(&slice[written..]);
         if pushed > 0 {
-            // 第一批新数据成功入 ring → 清掉 flushing，cpal 可以重新推进进度
-            if shared.flushing.swap(false, Ordering::AcqRel) {
-                log::debug!("push_samples: flushing cleared, new audio flowing");
-            }
             written += pushed;
-            // pushed 是实际写入 ring 的 f32 数，与 cpal pop 端计数单位一致
-            shared
-                .pushed_total
-                .fetch_add(pushed as u64, Ordering::Relaxed);
+            shared.pushed_total.fetch_add(pushed as u64, Ordering::Relaxed);
         } else {
-            // ring 满 → park
             park_decoder(shared);
         }
     }
     Ok(())
+}
+
+fn park_decoder(shared: &Arc<Shared>) {
+    let (lock, cvar) = &shared.wake;
+    let mut woken = lock.lock().unwrap();
+    while !*woken
+        && !shared.should_exit.load(Ordering::Acquire)
+        && shared.seek_target.lock().unwrap().is_none()
+    {
+        let r = cvar.wait_timeout(woken, Duration::from_millis(200)).unwrap();
+        woken = r.0;
+        if r.1.timed_out() {
+            break;
+        }
+    }
+    *woken = false;
 }
 
 fn resolve_layout(
@@ -611,45 +852,46 @@ fn resolve_layout(
 }
 
 // ── 进度推送 ──────────────────────────────────────────────────────────────────
+
 fn progress_loop(
     app: AppHandle,
     chapters: Arc<Vec<Chapter>>,
     shared: Arc<Shared>,
     output_rate: u32,
 ) {
-    let mut last_emit_chapter_ended: Option<usize> = None;
+    let mut last_chapter_ended: Option<usize> = None;
 
     while !shared.should_exit.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(PROGRESS_TICK_MS));
 
-        // 当前播放绝对秒 = origin + (popped - baseline) / rate
-        // origin 和 baseline 在同一个 cpal callback 里原子性切换，读取时配对一致
+        if shared.read_gen.load(Ordering::Acquire) != shared.write_gen.load(Ordering::Acquire) {
+            continue;
+        }
+
         let popped = shared.popped_total.load(Ordering::Acquire);
-        let baseline = shared.origin_popped_baseline.load(Ordering::Acquire);
+        let baseline = shared.origin_baseline.load(Ordering::Acquire);
         let played = popped.saturating_sub(baseline);
-        let abs_sec =
-            *shared.decode_origin_sec.lock().unwrap() + played as f64 / output_rate as f64;
+        let abs_sec = *shared.origin_sec.lock().unwrap() + played as f64 / output_rate as f64;
 
         let (chapter_idx, chapter_pos) = locate_chapter(&chapters, abs_sec);
-
-        // ── 章节自然结束检测 ──────────────────────────────────────────────────
-        let decode_done = shared.chapter_decode_done.load(Ordering::Acquire);
-        let ring_empty = shared.ring_occupied() == 0;
         let is_playing = shared.playing.load(Ordering::Acquire);
-        let has_played_since_seek = popped > baseline;
 
-        if decode_done && ring_empty && is_playing && has_played_since_seek {
+        let decode_done = shared.chapter_decode_done.load(Ordering::Acquire);
+        let ring_empty = shared.ring.occupied() == 0;
+        let has_played = popped > baseline;
+
+        if decode_done && ring_empty && is_playing && has_played {
             let cur = shared.current_chapter_idx.load(Ordering::Acquire);
-            if last_emit_chapter_ended != Some(cur) {
-                last_emit_chapter_ended = Some(cur);
+            if last_chapter_ended != Some(cur) {
+                last_chapter_ended = Some(cur);
                 let _ = app.emit(
                     "playback-chapter-ended",
                     serde_json::json!({ "chapterIndex": cur }),
                 );
-                log::info!("chapter {} ended", cur);
+                log::info!("chapter {cur} ended");
             }
         } else if !decode_done {
-            last_emit_chapter_ended = None;
+            last_chapter_ended = None;
         }
 
         let _ = app.emit(
@@ -661,6 +903,7 @@ fn progress_loop(
             }),
         );
     }
+
     log::info!("progress thread exited");
 }
 

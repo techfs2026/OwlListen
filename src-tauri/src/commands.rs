@@ -824,3 +824,10 @@ pub fn playback_seek(
         .seek_in_chapter(chapter_index, position_sec)
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn playback_set_speed(state: State<AppState>, speed: f32) -> Result<(), String> {
+    let guard = state.playback.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no playback engine")?;
+    engine.set_speed(speed).map_err(|e| e.to_string())
+}

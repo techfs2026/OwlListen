@@ -99,6 +99,14 @@ export async function playbackSeek(
   return invoke("playback_seek", { chapterIndex, positionSec });
 }
 
+/**
+ * 设置播放速率（0.25 ~ 4.0）
+ * 后端在 FFmpeg 解码线程通过 atempo filter 实现，音调不变
+ */
+export async function playbackSetSpeed(speed: number): Promise<void> {
+  return invoke("playback_set_speed", { speed });
+}
+
 export interface PlaybackProgressEvent {
   chapterIndex: number;
   positionSec: number;
