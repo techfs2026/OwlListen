@@ -31,9 +31,7 @@ zip = "8.5.1"
 wide = "1.3.0"
 base64 = "0.22.1"
 libc = "0.2.186"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-coreaudio-sys = "0.2.17"
+cpal = "0.17.3"
 
 [features]
 default = ["custom-protocol"]
