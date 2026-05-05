@@ -22,9 +22,15 @@ struct Shared {
     /// played_since_origin = popped_total - origin_popped_baseline
     origin_popped_baseline: AtomicU64,
     decode_origin_sec: Mutex<f64>,
+    /// do_seek 写入目标秒数，cpal flush 时取出并原子性地切换 decode_origin_sec
+    pending_origin_sec: Mutex<Option<f64>>,
     seek_request: Mutex<Option<f64>>,
-    discard_remaining: AtomicUsize,
     should_exit: AtomicBool,
+    /// do_seek 置 true → cpal 回调执行 flush 动作
+    flushing_ring: AtomicBool,
+    /// cpal flush 完成后置 true → push_samples 第一次成功写入后清 false
+    /// flushing=true 期间 cpal 正常 pop 但不推进 popped_total（屏蔽进度）
+    flushing: AtomicBool,
     playing: AtomicBool,
     wake: (Mutex<bool>, Condvar),
     chapter_decode_done: AtomicBool,
@@ -93,8 +99,10 @@ impl PlaybackEngine {
             pushed_total: AtomicU64::new(0),
             origin_popped_baseline: AtomicU64::new(0),
             decode_origin_sec: Mutex::new(absolute_start_sec),
+            pending_origin_sec: Mutex::new(None),
             seek_request: Mutex::new(None),
-            discard_remaining: AtomicUsize::new(0),
+            flushing_ring: AtomicBool::new(false),
+            flushing: AtomicBool::new(false),
             should_exit: AtomicBool::new(false),
             playing: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
@@ -167,10 +175,6 @@ impl PlaybackEngine {
     }
 
     pub fn play(&self) -> Result<()> {
-        // 如果之前是章节结束的"停"，当前 ring 已空、解码线程在 park
-        // 主动让解码线程从章末位置继续？不需要 —— 章节结束是用户级行为，
-        // 重新 play 应该有明确的目标位置（通常是 seek 或 go_to_chapter）。
-        // 这里只 resume cpal stream。
         self._stream.play().map_err(|e| anyhow!("play: {e}"))?;
         self.shared.playing.store(true, Ordering::Release);
         self.shared.wake_decoder();
@@ -195,24 +199,38 @@ impl PlaybackEngine {
     }
 
     fn do_seek(&self, abs_sec: f64, chapter_idx: usize, chapter_end: f64) -> Result<()> {
-        // 设 discard：让 cpal 回调把当前 ring 残留全部"吃掉但不输出"
-        let occupied = self.shared.ring_occupied() as usize;
-        self.shared
-            .discard_remaining
-            .store(occupied, Ordering::Release);
+        let s = &self.shared;
+
+        if s.playing.load(Ordering::Acquire) {
+            // ── 播放中：交给 cpal 回调在下一个 callback 里执行 flush ──────────
+            // cpal 回调会：清空 ring → 更新 popped_total → 锁定 baseline →
+            //              取出 pending_origin_sec 写入 decode_origin_sec → 置 flushing=true
+            *s.pending_origin_sec.lock().unwrap() = Some(abs_sec);
+            s.flushing_ring.store(true, Ordering::Release);
+        } else {
+            // ── 暂停中：cpal 回调不跑，直接在主线程完成 flush ────────────────
+            // 此时解码线程在 park，ring 不会有新数据写入，直接操作是安全的。
+            // 注意：ring 的 consumer 在 cpal 回调闭包里，这里无法直接清空，
+            // 改为把 pushed_total 拉平到 popped_total，让 ring_occupied() == 0，
+            // 并把 flushing_ring 置 true，等 play() 触发第一个 cpal callback 时再真正清空。
+            // 但 origin/baseline 必须现在就更新，否则 progress_loop 在 paused 期间会显示旧位置。
+            *s.decode_origin_sec.lock().unwrap() = abs_sec;
+            let cur_popped = s.popped_total.load(Ordering::Acquire);
+            s.origin_popped_baseline.store(cur_popped, Ordering::Release);
+            // 让 ring_occupied() 看起来为 0（解码线程不会在 park 时 push）
+            s.pushed_total.store(cur_popped, Ordering::Release);
+            // 仍然设 flushing_ring，play() 后第一个 callback 会真正清空 ring 里残留的旧数据
+            s.flushing_ring.store(true, Ordering::Release);
+            s.flushing.store(true, Ordering::Release);
+        }
 
         // 通知解码线程
-        *self.shared.seek_request.lock().unwrap() = Some(abs_sec);
-        self.shared
-            .current_chapter_idx
-            .store(chapter_idx, Ordering::Release);
-        *self.shared.current_chapter_end_sec.lock().unwrap() = chapter_end;
-        self.shared
-            .chapter_decode_done
-            .store(false, Ordering::Release);
-        self.shared.wake_decoder();
+        *s.seek_request.lock().unwrap() = Some(abs_sec);
+        s.current_chapter_idx.store(chapter_idx, Ordering::Release);
+        *s.current_chapter_end_sec.lock().unwrap() = chapter_end;
+        s.chapter_decode_done.store(false, Ordering::Release);
+        s.wake_decoder();
 
-        // cpal 不动！它要么在播（继续往下播 discard 后的内容），要么在暂停（用户点了暂停就保持暂停）
         Ok(())
     }
 }
@@ -246,32 +264,53 @@ fn build_stream(
             move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let frames = out.len() / channels;
 
-                // 1. 先吃掉 seek 留下的"discard"残留（不输出）
-                let mut to_discard = shared.discard_remaining.load(Ordering::Acquire);
-                let mut discarded = 0u64;
-                while to_discard > 0 {
-                    if consumer.try_pop().is_some() {
-                        to_discard -= 1;
+                // ── 1. seek flush ────────────────────────────────────────────
+                // 清空 ring，并在同一个 callback 内原子性地切换 origin 和 baseline，
+                // 确保 progress_loop 读到的两个值永远是同一个 seek 的配对。
+                if shared.flushing_ring.swap(false, Ordering::AcqRel) {
+                    let mut discarded = 0u64;
+                    while consumer.try_pop().is_some() {
                         discarded += 1;
-                    } else {
-                        break;
                     }
-                }
-                if discarded > 0 {
+                    // discarded 按实际从 ring 弹出的 f32 数计（与 push_samples 单位一致）
                     shared.popped_total.fetch_add(discarded, Ordering::Relaxed);
-                }
-                shared
-                    .discard_remaining
-                    .store(to_discard, Ordering::Release);
 
-                // 2. 正常填 out
+                    // baseline 锁定：ring 清空后此刻的 popped_total 就是新的零点
+                    let new_baseline = shared.popped_total.load(Ordering::Relaxed);
+                    shared
+                        .origin_popped_baseline
+                        .store(new_baseline, Ordering::Relaxed);
+
+                    // 同步切换 decode_origin_sec（由 do_seek 通过 pending_origin_sec 传来）
+                    if let Some(origin) = shared.pending_origin_sec.lock().unwrap().take() {
+                        *shared.decode_origin_sec.lock().unwrap() = origin;
+                    }
+
+                    // 通知 pop 段：ring 已空，等新数据进来再开始推进进度
+                    shared.flushing.store(true, Ordering::Release);
+
+                    log::debug!(
+                        "cpal flush done: discarded={} new_baseline={}",
+                        discarded,
+                        new_baseline
+                    );
+                }
+
+                // ── 2. 正常填 out ────────────────────────────────────────────
+                // flushing=true 期间输出静音（ring 为空 try_pop 返回 None → 0.0），
+                // 但不推进 popped_total，避免进度在新数据到来前乱跳。
+                let is_flushing = shared.flushing.load(Ordering::Acquire);
                 let mut filled = 0u64;
                 for fi in 0..frames {
+                    // ring 里存的是单声道 f32，每次 pop 一个，复制到所有输出声道
                     let s = consumer.try_pop().unwrap_or(0.0);
                     for ch in 0..channels {
                         out[fi * channels + ch] = s;
                     }
-                    filled += 1;
+                    // 只计实际从 ring 弹出的逻辑采样数（不乘 channels）
+                    if !is_flushing {
+                        filled += 1;
+                    }
                 }
                 shared.popped_total.fetch_add(filled, Ordering::Relaxed);
                 shared.wake_decoder();
@@ -292,9 +331,6 @@ fn decode_loop(
     mut producer: HeapProd<f32>,
     shared: Arc<Shared>,
 ) -> Result<()> {
-    use ffmpeg::ffi;
-    use std::os::raw::c_int;
-
     let mut ictx = ffmpeg::format::input(&path).with_context(|| format!("open: {path}"))?;
     let stream_info = {
         let s = ictx
@@ -341,45 +377,57 @@ fn decode_loop(
         stream_tb_f,
         initial_seek_sec,
     )?;
+    // 初始化时直接写（此时 cpal stream 还未 play，无竞态）
     *shared.decode_origin_sec.lock().unwrap() = initial_seek_sec;
     shared.popped_total.store(0, Ordering::Release);
     shared.pushed_total.store(0, Ordering::Release);
+    shared.origin_popped_baseline.store(0, Ordering::Release);
 
     let mut decoded = ffmpeg::frame::Audio::empty();
     let mut resampled = ffmpeg::frame::Audio::empty();
-    // 用解码 frame 的 pts 跟踪当前解码到哪
     let mut last_decode_pos_sec = initial_seek_sec;
+    let mut skip_until_sec: Option<f64> = None;
 
     'main: loop {
         if shared.should_exit.load(Ordering::Acquire) {
             break;
         }
 
-        // ── 1. 处理 seek 请求 ───────────────────────────────────
+        // ── 1. 处理 seek 请求 ────────────────────────────────────────────────
         let pending_seek = shared.seek_request.lock().unwrap().take();
         if let Some(target) = pending_seek {
             seek_to(&mut ictx, &mut decoder, stream_index, stream_tb_f, target)?;
-            *shared.decode_origin_sec.lock().unwrap() = target;
+
+            // AAC/M4B：seek 后 resampler 内部仍缓存着旧数据，必须重建。
+            // 否则 resampler 会在新帧之前吐出一批旧数据混入 ring，造成听到旧章节内容。
+            resampler = ffmpeg::software::resampling::Context::get(
+                src_format,
+                src_layout,
+                src_rate,
+                ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Planar),
+                ffmpeg::channel_layout::ChannelLayout::MONO,
+                output_rate,
+            )?;
+
+            // decode_origin_sec / baseline 由 cpal flush 回调（或 do_seek 暂停分支）负责更新
             current_chapter_idx = shared.current_chapter_idx.load(Ordering::Acquire);
             current_chapter_end = *shared.current_chapter_end_sec.lock().unwrap();
             shared.chapter_decode_done.store(false, Ordering::Release);
             last_decode_pos_sec = target;
-            let baseline = shared.pushed_total.load(Ordering::Acquire);
-            shared
-                .origin_popped_baseline
-                .store(baseline, Ordering::Release);
-            log::debug!("seek: target={:.2}s baseline={}", target, baseline);
+            // AAC GOP 对齐：seek 会落到目标前的关键帧，skip_until_sec 丢弃目标前的帧
+            skip_until_sec = Some(target);
+            log::debug!("decode seek: target={:.2}s", target);
             continue 'main;
         }
 
-        // ── 2. 章节结束检测 ─────────────────────────────────────
+        // ── 2. 章节结束检测 ──────────────────────────────────────────────────
         if last_decode_pos_sec >= current_chapter_end {
             shared.chapter_decode_done.store(true, Ordering::Release);
             park_decoder(&shared);
             continue 'main;
         }
 
-        // ── 3. ring 满 → park ──────────────────────────────────
+        // ── 3. ring 满 → park ────────────────────────────────────────────────
         let occupied = shared.ring_occupied() as usize;
         let cap = producer.capacity().get();
         if cap - occupied < output_rate as usize / 8 {
@@ -387,12 +435,29 @@ fn decode_loop(
             continue 'main;
         }
 
-        // ── 4. 解一帧 ───────────────────────────────────────────
+        // ── 4. 解一帧 ────────────────────────────────────────────────────────
         match decoder.receive_frame(&mut decoded) {
             Ok(_) => {
+                let mut frame_sec = last_decode_pos_sec;
                 if let Some(pts) = decoded.pts() {
-                    last_decode_pos_sec = pts as f64 * stream_tb_f;
+                    frame_sec = pts as f64 * stream_tb_f;
+                    last_decode_pos_sec = frame_sec;
                 }
+
+                if let Some(target_sec) = skip_until_sec {
+                    // AAC 的 pts 在 seek 后前几帧可能是 None 或不准确。
+                    // 策略：pts 已知时，pts < target 的帧全丢；
+                    //        pts 为 None 时，用 last_decode_pos_sec 兜底继续丢。
+                    // 一旦 pts >= target，认为已到达正确位置，清除标记并放行。
+                    let effective_sec = decoded.pts()
+                        .map(|p| p as f64 * stream_tb_f)
+                        .unwrap_or(last_decode_pos_sec);
+                    if effective_sec < target_sec {
+                        continue 'main;
+                    }
+                    skip_until_sec = None;
+                }
+
                 resampler.run(&decoded, &mut resampled)?;
                 push_samples(&resampled, &mut producer, &shared)?;
             }
@@ -492,13 +557,18 @@ fn push_samples(
         if shared.should_exit.load(Ordering::Acquire) {
             return Ok(());
         }
-        // seek 来了就放弃当前 frame
+        // seek 来了就放弃当前 frame，回到主循环处理新的 seek_request
         if shared.seek_request.lock().unwrap().is_some() {
             return Ok(());
         }
         let pushed = producer.push_slice(&slice[written..]);
         if pushed > 0 {
+            // 第一批新数据成功入 ring → 清掉 flushing，cpal 可以重新推进进度
+            if shared.flushing.swap(false, Ordering::AcqRel) {
+                log::debug!("push_samples: flushing cleared, new audio flowing");
+            }
             written += pushed;
+            // pushed 是实际写入 ring 的 f32 数，与 cpal pop 端计数单位一致
             shared
                 .pushed_total
                 .fetch_add(pushed as u64, Ordering::Relaxed);
@@ -524,11 +594,7 @@ fn resolve_layout(
         let stream = input.stream(stream_index).unwrap();
         let par = stream.parameters().as_ptr();
         let nb = (*par).ch_layout.nb_channels;
-        if nb > 0 {
-            nb as u32
-        } else {
-            0
-        }
+        if nb > 0 { nb as u32 } else { 0 }
     };
     let layout = match ch {
         1 => ChannelLayout::MONO,
@@ -556,7 +622,8 @@ fn progress_loop(
     while !shared.should_exit.load(Ordering::Acquire) {
         thread::sleep(Duration::from_millis(PROGRESS_TICK_MS));
 
-        // 当前播放绝对秒 = origin + (popped - origin_popped_baseline) / rate
+        // 当前播放绝对秒 = origin + (popped - baseline) / rate
+        // origin 和 baseline 在同一个 cpal callback 里原子性切换，读取时配对一致
         let popped = shared.popped_total.load(Ordering::Acquire);
         let baseline = shared.origin_popped_baseline.load(Ordering::Acquire);
         let played = popped.saturating_sub(baseline);
@@ -566,8 +633,6 @@ fn progress_loop(
         let (chapter_idx, chapter_pos) = locate_chapter(&chapters, abs_sec);
 
         // ── 章节自然结束检测 ──────────────────────────────────────────────────
-        // 条件：解码已到章末 + ring 已空 + 当前在播放 + 自上次 seek 以来确实播过新数据
-        // 最后一项很关键：seek 刚发起时 ring 可能瞬间为空，会误判
         let decode_done = shared.chapter_decode_done.load(Ordering::Acquire);
         let ring_empty = shared.ring_occupied() == 0;
         let is_playing = shared.playing.load(Ordering::Acquire);
@@ -577,8 +642,6 @@ fn progress_loop(
             let cur = shared.current_chapter_idx.load(Ordering::Acquire);
             if last_emit_chapter_ended != Some(cur) {
                 last_emit_chapter_ended = Some(cur);
-                // 注意：这里不 store playing = false
-                // 由前端收到事件后调用 playback_pause 命令统一处理 cpal stream 的 pause
                 let _ = app.emit(
                     "playback-chapter-ended",
                     serde_json::json!({ "chapterIndex": cur }),
@@ -586,7 +649,6 @@ fn progress_loop(
                 log::info!("chapter {} ended", cur);
             }
         } else if !decode_done {
-            // 解码恢复了（seek 到新位置）→ 允许重新触发 chapter-ended
             last_emit_chapter_ended = None;
         }
 
