@@ -28,7 +28,11 @@ pub fn run() {
             commands::push_recent_audiobook,
             commands::remove_recent_audiobook,
             commands::get_audiobook_cover,
-            commands::export_chapter_slice,
+            commands::playback_open,
+            commands::playback_play,
+            commands::playback_pause,
+            commands::playback_close,
+            commands::playback_seek,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -6,7 +6,7 @@ use tauri::ipc::Response;
 use tauri::State;
 
 use crate::audio::decode_audio;
-use crate::audiobook::export_chapter_slice as audiobook_export_chapter_slice;
+
 use crate::audiobook::remove_recent_book;
 use crate::audiobook::{get_progress, set_progress, BookProgress};
 use crate::audiobook::{get_recent_books, push_recent_book, RecentBook};
@@ -20,11 +20,10 @@ use tauri::Manager;
 
 pub struct AppState {
     pub summary: Mutex<Option<crate::waveform::WaveformSummary>>,
-    /// 当前加载的音频文件路径（切割时用）
     pub audio_path: Mutex<Option<String>>,
-    /// 缓存的 Whisper 模型上下文。第一次转写时加载，之后复用。
-    /// 用 (model_name, ctx) 元组：切换模型时自动重建。
     pub whisper_ctx: Mutex<Option<(String, whisper_rs::WhisperContext)>>,
+    /// 有声书播放引擎（最多一个活跃）
+    pub playback: Mutex<Option<crate::audiobook::PlaybackEngine>>,
 }
 
 impl AppState {
@@ -33,6 +32,7 @@ impl AppState {
             summary: Mutex::new(None),
             audio_path: Mutex::new(None),
             whisper_ctx: Mutex::new(None),
+            playback: Mutex::new(None),
         }
     }
 }
@@ -344,7 +344,7 @@ fn write_mp3(path: &Path, samples: &[f32], sample_rate: u32) -> anyhow::Result<(
 
 #[tauri::command]
 pub fn transcribe_segments(
-    app: AppHandle,  
+    app: AppHandle,
     segment_paths: Vec<String>,
     model: String,
 ) -> Result<Vec<String>, String> {
@@ -379,7 +379,7 @@ pub fn transcribe_segments(
 }
 
 fn get_or_load_whisper_ctx<'a>(
-    app: &AppHandle, 
+    app: &AppHandle,
     state: &'a State<AppState>,
     model: &str,
 ) -> Result<std::sync::MutexGuard<'a, Option<(String, whisper_rs::WhisperContext)>>, String> {
@@ -632,20 +632,6 @@ pub fn load_audiobook(path: String) -> Result<AudiobookMeta, String> {
     parse_audiobook(&path).map_err(|e| e.to_string())
 }
 
-/// 将指定时间区间的音频切片导出为 ADTS/AAC 字节流，直接返回给前端。
-/// 前端用 ctx.decodeAudioData(buffer) 即可解码播放，无需落盘。
-/// start_sec / end_sec 是相对整个文件的秒数（与 Chapter.startSec / endSec 一致）。
-#[tauri::command]
-pub fn export_chapter_slice(
-    path: String,
-    start_sec: f64,
-    end_sec: f64,
-) -> Result<Response, String> {
-    let bytes =
-        audiobook_export_chapter_slice(&path, start_sec, end_sec).map_err(|e| e.to_string())?;
-    Ok(Response::new(bytes))
-}
-
 /// 读取播放进度
 #[tauri::command]
 pub fn get_audiobook_progress(app: AppHandle, book_path: String) -> BookProgress {
@@ -777,4 +763,64 @@ fn extract_cover(path: &str) -> anyhow::Result<Option<CoverDto>> {
 pub fn remove_recent_audiobook(app: AppHandle, book_path: String) -> Result<(), String> {
     let dir = app_data_dir(&app);
     remove_recent_book(&dir, &book_path).map_err(|e| e.to_string())
+}
+
+
+#[tauri::command]
+pub fn playback_open(
+    app: AppHandle,
+    state: State<AppState>,
+    path: String,
+    chapter_index: usize,
+    position_sec: f64,
+) -> Result<(), String> {
+    use crate::audiobook::{parse_audiobook, PlaybackEngine};
+
+    let meta = parse_audiobook(&path).map_err(|e| e.to_string())?;
+    let engine = PlaybackEngine::open(
+        &path,
+        meta.chapters,
+        chapter_index,
+        position_sec,
+        app,
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut guard = state.playback.lock().unwrap();
+    *guard = Some(engine); // 旧的自动 drop
+    Ok(())
+}
+
+#[tauri::command]
+pub fn playback_play(state: State<AppState>) -> Result<(), String> {
+    let guard = state.playback.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no playback engine")?;
+    engine.play().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn playback_pause(state: State<AppState>) -> Result<(), String> {
+    let guard = state.playback.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no playback engine")?;
+    engine.pause().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn playback_close(state: State<AppState>) -> Result<(), String> {
+    let mut guard = state.playback.lock().unwrap();
+    *guard = None;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn playback_seek(
+    state: State<AppState>,
+    chapter_index: usize,
+    position_sec: f64,
+) -> Result<(), String> {
+    let guard = state.playback.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no playback engine")?;
+    engine
+        .seek_in_chapter(chapter_index, position_sec)
+        .map_err(|e| e.to_string())
 }
