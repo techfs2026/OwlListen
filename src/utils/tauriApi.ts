@@ -84,7 +84,7 @@ export async function splitAudio(
  */
 export async function transcribeSegments(
   segmentPaths: string[],
-  model: string = "base"
+  model: string = "small"
 ): Promise<string[]> {
   return await invoke<string[]>("transcribe_segments", {
     segmentPaths,

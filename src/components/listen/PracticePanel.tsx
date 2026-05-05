@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Btn, MiniPlayer } from "@/components/shared/Primitives";
 import { DiffView } from "./DiffView";

@@ -1,4 +1,3 @@
-import React from "react";
 import type { DiffResult } from "@/hooks/useDiff";
 import "./DiffView.scss";
 

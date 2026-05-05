@@ -71,3 +71,40 @@ export function toAssetUrl(path: string): string {
 export async function removeRecentAudiobook(path: string): Promise<void> {
   return invoke("remove_recent_audiobook", { bookPath: path });
 }
+
+export async function playbackOpen(
+  path: string,
+  chapterIndex: number,
+  positionSec: number,
+): Promise<void> {
+  return invoke("playback_open", { path, chapterIndex, positionSec });
+}
+
+export async function playbackPlay(): Promise<void> {
+  return invoke("playback_play");
+}
+
+export async function playbackPause(): Promise<void> {
+  return invoke("playback_pause");
+}
+
+export async function playbackClose(): Promise<void> {
+  return invoke("playback_close");
+}
+
+export async function playbackSeek(
+  chapterIndex: number,
+  positionSec: number,
+): Promise<void> {
+  return invoke("playback_seek", { chapterIndex, positionSec });
+}
+
+export interface PlaybackProgressEvent {
+  chapterIndex: number;
+  positionSec: number;
+  playing: boolean;
+}
+
+export interface PlaybackChapterEndedEvent {
+  chapterIndex: number;
+}
