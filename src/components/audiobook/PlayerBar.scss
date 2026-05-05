@@ -25,6 +25,16 @@
     }
   }
 
+  &__tooltip {
+    background: var(--color-brand);
+    color: #fff;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    user-select: none;
+  }
+
   &__progress-area {
     flex: 1;
     cursor: pointer;
@@ -123,13 +133,13 @@
       color var(--duration-fast) var(--ease-out);
 
     &:hover:not(.player-bar__speed--active) {
-      background: var(--color-hover-overlay);
-      color: var(--color-ink-1);
+      color: var(--color-brand);
+      background: var(--color-brand-soft);
     }
 
     &--active {
-      background: var(--color-ink-1);
-      color: #fff;
+      color: var(--color-brand);
+      background: var(--color-brand-soft);
       font-weight: 600;
     }
   }

@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from "react";
+import React, { useRef, useState, useCallback } from "react";
 import { PlayBtn } from "@/components/shared/Primitives";
 import { SPEEDS, type PlayState, type Speed } from "@/hooks/useAudiobook";
 import type { Chapter } from "@/utils/audiobookApi";
@@ -41,6 +41,14 @@ export function PlayerBar({
   const trackRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef(false);
 
+  const [tooltip, setTooltip] = useState<{ x: number; time: number } | null>(null);
+
+  const getRatioFromClientX = useCallback((clientX: number) => {
+    if (!trackRef.current) return 0;
+    const rect = trackRef.current.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  }, []);
+
   const seekFromEvent = useCallback((clientX: number) => {
     if (!isReady || chDur <= 0 || !trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
@@ -62,18 +70,51 @@ export function PlayerBar({
     window.addEventListener("mouseup", onUp);
   }, [isReady, seekFromEvent]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isReady || chDur <= 0 || !trackRef.current) return;
+    const rect = trackRef.current.getBoundingClientRect();
+    const ratio = getRatioFromClientX(e.clientX);
+    // x 相对于进度条容器左边，夹到 [0, width] 防止溢出
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    setTooltip({ x, time: ratio * chDur });
+  }, [isReady, chDur, getRatioFromClientX]);
+
+  const handleMouseLeave = useCallback(() => {
+    setTooltip(null);
+  }, []);
+
   return (
     <div className="player-bar">
       <div className="player-bar__seek-row">
         <span className="player-bar__time">{isReady ? fmtTime(currentTime) : "--:--"}</span>
 
-        <div className="player-bar__progress-area" ref={trackRef} onMouseDown={handleMouseDown}>
+        <div className="player-bar__progress-area" ref={trackRef}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+          style={{ position: "relative" }}
+        >
           <div className="player-bar__progress-track">
             <div className="player-bar__progress-fill" style={{ width: `${progress * 100}%` }} />
             {isReady && (
               <div className="player-bar__progress-thumb" style={{ left: `${progress * 100}%` }} />
             )}
           </div>
+
+          {tooltip !== null && (
+            <div
+              className="player-bar__tooltip"
+              style={{
+                position: "absolute",
+                bottom: "calc(100% + 8px)",
+                left: tooltip.x,
+                transform: "translateX(-50%)",
+                pointerEvents: "none",
+              }}
+            >
+              {fmtTime(tooltip.time)}
+            </div>
+          )}
         </div>
 
         <span className="player-bar__time player-bar__time--muted">

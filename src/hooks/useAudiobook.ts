@@ -53,6 +53,8 @@ export function useAudiobook(): UseAudiobookReturn {
   const [speed, setSpeedState] = useState<Speed>(1);
   const [recentBooks, setRecentBooks] = useState<RecentBook[]>([]);
 
+  const currentTimeRef = useRef(0);
+  const speedRef = useRef<Speed>(1);
   const bookPathRef = useRef("");
   const chapterIndexRef = useRef(0);
   const lastSavedAtRef = useRef(0);
@@ -64,6 +66,7 @@ export function useAudiobook(): UseAudiobookReturn {
     let unlisten: UnlistenFn | undefined;
     listen<PlaybackProgressEvent>("playback-progress", (event) => {
       const { chapterIndex, positionSec, playing } = event.payload;
+      currentTimeRef.current = positionSec;
       chapterIndexRef.current = chapterIndex;
       setCurrentChapterIndex(chapterIndex);
       setCurrentTime(positionSec);
@@ -118,12 +121,19 @@ export function useAudiobook(): UseAudiobookReturn {
 
       const chIdx = Math.min(progress.chapterIndex, bookMeta.chapters.length - 1);
       const posSec = progress.positionSec;
+      currentTimeRef.current = posSec;
       chapterIndexRef.current = chIdx;
       setCurrentChapterIndex(chIdx);
       setCurrentTime(posSec);
 
       // 启动后端引擎（不自动播放）
       await playbackOpen(path, chIdx, posSec);
+
+      const currentSpeed = speedRef.current;
+      if (currentSpeed !== 1) {
+        await playbackSetSpeed(currentSpeed).catch(() => {});
+      }
+
       setPlayState("ready");
     } catch (err) {
       console.error("[audiobook] open failed:", err);
@@ -137,7 +147,7 @@ export function useAudiobook(): UseAudiobookReturn {
 
   const pause = useCallback(() => {
     playbackPause().catch((e) => console.error("[audiobook] pause:", e));
-    saveAudiobookProgress(bookPathRef.current, chapterIndexRef.current, 0)
+    saveAudiobookProgress(bookPathRef.current, chapterIndexRef.current, currentTimeRef.current)
       .catch(() => { });
   }, []);
 
@@ -150,34 +160,73 @@ export function useAudiobook(): UseAudiobookReturn {
     const meta = metaRef.current;
     if (!meta) return;
     const clamped = Math.max(0, Math.min(index, meta.chapters.length - 1));
+    // 主动更新前端 state，不依赖后端推事件（暂停/ready 状态后端不推）
+    chapterIndexRef.current = clamped;
+    currentTimeRef.current = positionSec;
+    setCurrentChapterIndex(clamped);
+    setCurrentTime(positionSec);
     playbackSeek(clamped, positionSec)
+      .then(() => {
+        // seek 完成后重新 apply 速率，防止后端重建管道时重置为 1x
+        if (speedRef.current !== 1) {
+          return playbackSetSpeed(speedRef.current);
+        }
+      })
       .catch((e) => console.error("[audiobook] goToChapter:", e));
   }, []);
-
+  
   const nextChapter = useCallback(() => {
     const meta = metaRef.current;
     if (!meta) return;
     const next = chapterIndexRef.current + 1;
     if (next < meta.chapters.length) {
-      playbackSeek(next, 0).catch((e) => console.error("[audiobook] next:", e));
+      chapterIndexRef.current = next;
+      currentTimeRef.current = 0;
+      setCurrentChapterIndex(next);
+      setCurrentTime(0);
+      playbackSeek(next, 0)
+        .then(() => {
+          if (speedRef.current !== 1) {
+            return playbackSetSpeed(speedRef.current);
+          }
+        })
+        .catch((e) => console.error("[audiobook] next:", e));
+    }
+  }, []);
+  
+  const prevChapter = useCallback(() => {
+    const applySpeed = () => {
+      if (speedRef.current !== 1) {
+        playbackSetSpeed(speedRef.current).catch(() => {});
+      }
+    };
+  
+    if (currentTimeRef.current > 3) {
+      currentTimeRef.current = 0;
+      setCurrentTime(0);
+      playbackSeek(chapterIndexRef.current, 0)
+        .then(applySpeed)
+        .catch((e) => console.error("[audiobook] prev:", e));
+    } else if (chapterIndexRef.current > 0) {
+      const prev = chapterIndexRef.current - 1;
+      chapterIndexRef.current = prev;
+      currentTimeRef.current = 0;
+      setCurrentChapterIndex(prev);
+      setCurrentTime(0);
+      playbackSeek(prev, 0)
+        .then(applySpeed)
+        .catch((e) => console.error("[audiobook] prev:", e));
+    } else {
+      currentTimeRef.current = 0;
+      setCurrentTime(0);
+      playbackSeek(0, 0)
+        .then(applySpeed)
+        .catch((e) => console.error("[audiobook] prev:", e));
     }
   }, []);
 
-  const prevChapter = useCallback(() => {
-    // 当前章节内已播超过 3 秒：回到本章开头；否则跳上一章
-    if (currentTime > 3) {
-      playbackSeek(chapterIndexRef.current, 0)
-        .catch((e) => console.error("[audiobook] prev:", e));
-    } else if (chapterIndexRef.current > 0) {
-      playbackSeek(chapterIndexRef.current - 1, 0)
-        .catch((e) => console.error("[audiobook] prev:", e));
-    } else {
-      playbackSeek(0, 0)
-        .catch((e) => console.error("[audiobook] prev:", e));
-    }
-  }, [currentTime]);
-
   const setSpeed = useCallback((s: Speed) => {
+    speedRef.current = s; 
     setSpeedState(s);
     playbackSetSpeed(s).catch((e) => console.error("[audiobook] setSpeed:", e));
   }, []);
