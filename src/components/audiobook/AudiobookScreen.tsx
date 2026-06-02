@@ -101,8 +101,7 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
       switch (e.key) {
-        case "p":
-        case "P":
+        case " ":
           {
             e.preventDefault();
             if (playState === "playing") pause();

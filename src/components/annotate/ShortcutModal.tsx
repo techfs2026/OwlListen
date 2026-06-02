@@ -5,7 +5,7 @@ const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] 
   {
     group: "键盘",
     items: [
-      { key: "P", label: "播放 / 暂停" },
+      { key: "空格", label: "播放 / 暂停" },
       { key: "L", label: "切换回环" },
       { key: "← / →", label: "上一段 / 下一段" },
       { key: "H", label: "显示 / 隐藏帮助" },

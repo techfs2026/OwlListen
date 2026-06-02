@@ -342,7 +342,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   // ── 键盘快捷键 ────────────────────────────────────────────────────────────
   //
-  // P      播放/暂停
+  // 空格    播放/暂停
   // L      切换回环播放（当前时间所在/最近的 label）
   // ←/→   上一段 / 下一段（片段间导航，保持缩放只平移）
   // H      显示/隐藏快捷键帮助
@@ -371,8 +371,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         return;
       }
 
-      // P：播放/暂停
-      if (e.key === "p" || e.key === "P") {
+      // 空格：播放/暂停（聚焦在按钮上时让位给按钮的点击）
+      if (e.key === " " || e.code === "Space") {
+        if (el?.tagName === "BUTTON") return;
         if (loadingState !== "ready") return;
         e.preventDefault();
         if (playState === "playing") pause();
