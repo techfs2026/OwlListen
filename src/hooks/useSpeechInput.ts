@@ -10,7 +10,7 @@ export type SpeechState =
   | "unsupported";  // 浏览器不支持 MediaRecorder（理论上 Tauri 都支持）
 
 export interface UseSpeechInputOptions {
-  /** Whisper 模型，默认 "base"（约 150MB，速度/质量平衡） */
+  /** Whisper 模型，默认 "small"（约 465MB，质量优先，全应用统一） */
   model?: string;
 }
 
@@ -64,7 +64,7 @@ export function useSpeechInput(
   onTranscript: (text: string, isFinal: boolean) => void,
   options: UseSpeechInputOptions = {},
 ): UseSpeechInputReturn {
-  const { model = "base" } = options;
+  const { model = "small" } = options;
 
   const [speechState, setSpeechState] = useState<SpeechState>(() => {
     if (typeof MediaRecorder === "undefined") return "unsupported";

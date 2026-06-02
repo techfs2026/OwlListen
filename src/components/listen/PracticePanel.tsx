@@ -84,7 +84,7 @@ export function PracticePanel({
 
   const { speechState, toggleListening, stopListening } = useSpeechInput(
     handleTranscript,
-    { model: "base" },
+    { model: "small" },
   );
 
   const isListening = speechState === "listening";

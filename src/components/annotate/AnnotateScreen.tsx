@@ -6,57 +6,20 @@ import { WaveformCanvas } from "./WaveformCanvas";
 import { TimeAxis } from "./TimeAxis";
 import { LabelList } from "./LabelList";
 import { ExportPanel, type ExportProgress } from "./ExportPanel";
+import { ShortcutModal } from "./ShortcutModal";
 import { useWaveform } from "@/hooks/useWaveform";
 import { useLabels } from "@/hooks/useLabels";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
-import { splitAudio, transcribeSegments, buildZip, getTempDir, getPeaks } from "@/utils/tauriApi";
-import type { RenderData } from "@/types/waveform";
-import type { SilenceRegion } from "@/hooks/useWebGL";
+import { splitAudio, transcribeSegments, buildZip, getTempDir } from "@/utils/tauriApi";
+import type { Label, RenderData } from "@/types/waveform";
 
 interface AnnotateScreenProps {
   onBack: () => void;
 }
 
-// ── 静音检测 ──────────────────────────────────────────────────────────────────
-
-const SILENCE_RATIO = 0.15;      // 低于中位数 RMS × 15% 视为静音
-const MIN_SILENCE_SEC = 0.1;     // 静音区间最短 100ms，过滤噪点
-
-/**
- * 从全曲 Envelope peaks（已映射到绝对时间）计算静音区间列表（秒）。
- * 输入 peaks 对应 [0, duration]，n 个点均匀分布。
- */
-function computeAbsSilenceRegions(
-  peaks: Array<{ rms: number }>,
-  duration: number,
-): Array<{ start: number; end: number }> {
-  const n = peaks.length;
-  if (n === 0) return [];
-
-  const rmsSorted = peaks.map((p) => p.rms).sort((a, b) => a - b);
-  const median = rmsSorted[Math.floor(n / 2)];
-  const threshold = median * SILENCE_RATIO;
-
-  const regions: Array<{ start: number; end: number }> = [];
-  let silStart = -1;
-
-  for (let i = 0; i <= n; i++) {
-    const isSilent = i < n && peaks[i].rms <= threshold;
-    if (isSilent && silStart === -1) {
-      silStart = i;
-    } else if (!isSilent && silStart !== -1) {
-      const start = (silStart / n) * duration;
-      const end   = (i / n) * duration;
-      if (end - start >= MIN_SILENCE_SEC) {
-        regions.push({ start, end });
-      }
-      silStart = -1;
-    }
-  }
-  return regions;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
+// 加载后初始视图分辨率：每秒约占 50 CSS px。窗口越宽 → 一屏看到的秒数越多，
+// 但单句的像素宽度保持稳定，便于拖拽框选。整曲短于此跨度时退化为显示全曲。
+const FIT_PX_PER_SEC = 50;
 
 export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   const {
@@ -80,26 +43,16 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // 全曲绝对时间静音区间，文件加载后一次性计算，与视图无关
-  const [absSilenceRegions, setAbsSilenceRegions] = useState<Array<{ start: number; end: number }>>([]);
+  const [showHelp, setShowHelp] = useState(false);
 
   const audioPathRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 当前视图的归一化静音条带（仅用于 WebGL 渲染）
-  // 从绝对时间区间换算，与 renderData.mode 无关——放大到 polyline/stem 也能显示
-  const silenceRegions = useMemo<SilenceRegion[]>(() => {
-    if (absSilenceRegions.length === 0) return [];
-    const { startSec, endSec } = viewRange;
-    const viewDur = endSec - startSec;
-    if (viewDur <= 0) return [];
-    return absSilenceRegions
-      .filter((r) => r.end > startSec && r.start < endSec)
-      .map((r) => ({
-        startRatio: Math.max(0, (r.start - startSec) / viewDur),
-        endRatio:   Math.min(1, (r.end   - startSec) / viewDur),
-      }));
-  }, [absSilenceRegions, viewRange]);
+  // 按起点排序的片段，供 ←/→ 片段间导航使用
+  const sortedLabels = useMemo<Label[]>(
+    () => [...labels].sort((a, b) => a.start - b.start),
+    [labels]
+  );
 
   // 重叠检测：O(n²)，label 数量通常 < 200 完全可接受
   const overlappingIds = useMemo<Set<string>>(() => {
@@ -188,6 +141,14 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   // ── 文件操作 ──────────────────────────────────────────────────────────────
 
+  // 按当前窗口宽度算出"适合的初始视图"：每秒约 FIT_PX_PER_SEC px。
+  // 在 loadFile 内一次性应用，避免先渲染整曲再 snap 的闪烁。
+  const computeFitView = useCallback((duration: number) => {
+    const w = containerRef.current?.clientWidth ?? 0;
+    const span = w > 0 ? w / FIT_PX_PER_SEC : duration;
+    return { startSec: 0, endSec: Math.min(span, duration) };
+  }, []);
+
   const handleOpenAudio = useCallback(async () => {
     const path = await open({
       multiple: false,
@@ -202,32 +163,8 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     clearLabels();
     unloadAudio();
     setLoop(null);
-    setAbsSilenceRegions([]);
-    await Promise.all([loadWaveform(path), loadAudio(path)]);
-  }, [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop]);
-
-  // 全曲静音分析：loadingState 变为 ready 时触发一次
-  // 直接调 getPeaks(0, duration, 1200)，不经过 fetchPeaks（后者绑定当前 viewRange）
-  useEffect(() => {
-    if (loadingState !== "ready" || !audioInfo) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await getPeaks(0, audioInfo.duration, 1200);
-        if (cancelled || !data || data.mode !== "envelope") return;
-        const ch = data.channels[0];
-        if (ch?.kind !== "envelope") return;
-        const regions = computeAbsSilenceRegions(ch.peaks, audioInfo.duration);
-        setAbsSilenceRegions(regions);
-        if (process.env.NODE_ENV !== "production") {
-          console.log(`[silence] ${regions.length} regions, duration=${audioInfo.duration.toFixed(1)}s`);
-        }
-      } catch (err) {
-        console.warn("[silence] analysis failed:", err);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [loadingState, audioInfo]);
+    await Promise.all([loadWaveform(path, computeFitView), loadAudio(path)]);
+  }, [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop, computeFitView]);
 
   const handleSaveLabels = useCallback(async () => {
     const path = await save({
@@ -249,33 +186,16 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   const handleSeek = useCallback((sec: number) => seek(sec), [seek]);
 
-  // 边界吸附：把 sec 吸到最近的静音边缘，阈值 = 视图时长 × 1%
-  const snapToSilence = useCallback((sec: number): number => {
-    if (absSilenceRegions.length === 0) return sec;
-    const threshold = (viewRange.endSec - viewRange.startSec) * 0.01;
-    let best = sec;
-    let bestDist = threshold;
-    for (const r of absSilenceRegions) {
-      const ds = Math.abs(sec - r.start);
-      const de = Math.abs(sec - r.end);
-      if (ds < bestDist) { bestDist = ds; best = r.start; }
-      if (de < bestDist) { bestDist = de; best = r.end; }
-    }
-    return best;
-  }, [absSilenceRegions, viewRange]);
-
   const handleRegionSelected = useCallback(
     (start: number, end: number) => {
-      const snappedStart = snapToSilence(start);
-      const snappedEnd   = snapToSilence(end);
-      const label = addLabel(snappedStart, snappedEnd);
+      const label = addLabel(start, end);
       setSelectedId(label.id);
       // 拖完自动开回环，立刻进入精听节奏
-      setLoop([snappedStart, snappedEnd]);
-      seek(snappedStart);
-      play(snappedStart);
+      setLoop([start, end]);
+      seek(start);
+      play(start);
     },
-    [addLabel, snapToSilence, setLoop, seek, play]
+    [addLabel, setLoop, seek, play]
   );
 
   const handleZoom = useCallback(
@@ -295,22 +215,70 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     [setViewRange, seek]
   );
 
-  // 边缘拖拽 + 吸附
+  // 选中片段并播放（回环则换 loop 区间，否则播一段自动停）。
+  // pan=true：仅当片段超出当前视图时平移过去，保持缩放级别不变（不改变分辨率）。
+  const selectLabel = useCallback(
+    (label: Label, pan: boolean) => {
+      setSelectedId(label.id);
+      if (pan) {
+        const dur = viewRange.endSec - viewRange.startSec;
+        if (label.start < viewRange.startSec || label.end > viewRange.endSec) {
+          const segDur = label.end - label.start;
+          const newStart = Math.max(0, label.start - (dur - segDur) / 2);
+          setViewRange({ startSec: newStart, endSec: newStart + dur });
+        }
+      }
+      if (loopRange) {
+        setLoop([label.start, label.end]);
+        seek(label.start);
+        play(label.start);
+      } else {
+        playSegment(label.start, label.end);
+      }
+    },
+    [viewRange, loopRange, setLoop, seek, play, playSegment, setViewRange]
+  );
+
+  // ←/→ 片段间导航：有选中按序号 ±1；无选中则跳到 playhead 之后/之前最近的一段。
+  const navigateSegment = useCallback(
+    (dir: 1 | -1) => {
+      if (sortedLabels.length === 0) return;
+      const curIdx = sortedLabels.findIndex((l) => l.id === selectedId);
+      let target: Label | undefined;
+      if (curIdx !== -1) {
+        const ni = curIdx + dir;
+        if (ni < 0 || ni >= sortedLabels.length) return;
+        target = sortedLabels[ni];
+      } else if (dir === 1) {
+        target = sortedLabels.find((l) => l.start > currentTime + 0.01);
+      } else {
+        for (let i = sortedLabels.length - 1; i >= 0; i--) {
+          if (sortedLabels[i].start < currentTime - 0.01) { target = sortedLabels[i]; break; }
+        }
+      }
+      if (target) selectLabel(target, true);
+    },
+    [sortedLabels, selectedId, currentTime, selectLabel]
+  );
+
+  // 边缘拖拽
   const handleLabelEdgeDrag = useCallback(
     (id: string, edge: "start" | "end", newSec: number) => {
       const label = labels.find((l) => l.id === id);
       if (!label) return;
       const clamped = Math.max(0, Math.min(newSec, audioInfo?.duration ?? Infinity));
-      const snapped = snapToSilence(clamped);
+      const isLooping = loopRange !== null && selectedId === id;
       if (edge === "start") {
-        const newStart = Math.min(snapped, label.end - 0.05);
+        const newStart = Math.min(clamped, label.end - 0.05);
         updateLabel(id, { start: newStart });
+        if (isLooping) setLoop([newStart, label.end]);
       } else {
-        const newEnd = Math.max(snapped, label.start + 0.05);
+        const newEnd = Math.max(clamped, label.start + 0.05);
         updateLabel(id, { end: newEnd });
+        if (isLooping) setLoop([label.start, newEnd]);
       }
     },
-    [labels, updateLabel, audioInfo, snapToSilence]
+    [labels, updateLabel, audioInfo, loopRange, selectedId, setLoop]
   );
 
   const handleDrop = useCallback(
@@ -324,10 +292,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       clearLabels();
       unloadAudio();
       setLoop(null);
-      setAbsSilenceRegions([]);
-      await Promise.all([loadWaveform(path), loadAudio(path)]);
+      await Promise.all([loadWaveform(path, computeFitView), loadAudio(path)]);
     },
-    [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop]
+    [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop, computeFitView]
   );
 
   // ── 导出 ──────────────────────────────────────────────────────────────────
@@ -376,15 +343,13 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   // ── 键盘快捷键 ────────────────────────────────────────────────────────────
   //
   // P      播放/暂停
-  // L      切换回环播放
-  // N      跳转到下一个静音区
-  // ← / →  切换选中区段（保持缩放，平移视图）
+  // L      切换回环播放（当前时间所在/最近的 label）
+  // ←/→   上一段 / 下一段（片段间导航，保持缩放只平移）
+  // H      显示/隐藏快捷键帮助
   //
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // ←→ 允许 repeat（按住连续切换）；其余不允许
-      const isLR = e.key === "ArrowLeft" || e.key === "ArrowRight";
-      if (e.repeat && !isLR) return;
+      if (e.repeat) return;
 
       const el = document.activeElement as HTMLElement | null;
       const inEditable =
@@ -392,6 +357,19 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         el?.tagName === "TEXTAREA" ||
         el?.isContentEditable === true;
       if (inEditable) return;
+
+      // H：显示 / 隐藏快捷键帮助
+      if (e.key === "h" || e.key === "H") {
+        e.preventDefault();
+        setShowHelp((v) => !v);
+        return;
+      }
+
+      // Esc：关闭帮助弹窗
+      if (e.key === "Escape") {
+        setShowHelp(false);
+        return;
+      }
 
       // P：播放/暂停
       if (e.key === "p" || e.key === "P") {
@@ -428,51 +406,11 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         return;
       }
 
-      // N：跳转到下一个静音区
-      if (e.key === "n" || e.key === "N") {
+      // ←/→：上一段 / 下一段
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
         if (loadingState !== "ready") return;
         e.preventDefault();
-
-        const next = absSilenceRegions.find((r) => r.start > currentTime + 0.05);
-        if (!next) return;
-
-        const dur = viewRange.endSec - viewRange.startSec;
-        const newStart = Math.max(0, next.start - dur * 0.3);
-        setViewRange({ startSec: newStart, endSec: newStart + dur });
-        seek(next.start);
-        return;
-      }
-
-      // ← / →：切换选中区段，保持当前缩放级别，平移视图使目标区段居中
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        if (loadingState !== "ready" || labels.length === 0) return;
-        e.preventDefault();
-
-        const curIdx = labels.findIndex((l) => l.id === selectedId);
-        let nextIdx: number;
-        if (curIdx === -1) {
-          nextIdx = e.key === "ArrowRight" ? 0 : labels.length - 1;
-        } else {
-          nextIdx = e.key === "ArrowRight"
-            ? Math.min(curIdx + 1, labels.length - 1)
-            : Math.max(curIdx - 1, 0);
-        }
-
-        const target = labels[nextIdx];
-        setSelectedId(target.id);
-
-        // 保持当前视图时长，平移使 target.start 落在视图左侧 25% 处
-        const viewDur = viewRange.endSec - viewRange.startSec;
-        const newStart = Math.max(0, target.start - viewDur * 0.25);
-        setViewRange({ startSec: newStart, endSec: newStart + viewDur });
-
-        if (loopRange) {
-          setLoop([target.start, target.end]);
-          seek(target.start);
-          play(target.start);
-        } else {
-          playSegment(target.start, target.end);
-        }
+        navigateSegment(e.key === "ArrowRight" ? 1 : -1);
         return;
       }
     };
@@ -480,11 +418,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [
-    playState, play, playSegment, pause, loadingState,
-    currentTime,
-    loopRange, setLoop, labels, seek,
-    absSilenceRegions, viewRange, setViewRange,
-    selectedId,
+    playState, play, pause, loadingState, navigateSegment,
+    currentTime, labels,
+    loopRange, setLoop, seek,
   ]);
 
   return (
@@ -501,10 +437,11 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         playing={isPlaying}
         looping={loopRange !== null}
         onBack={onBack}
+        onShowHelp={() => setShowHelp(true)}
         onOpenAudio={handleOpenAudio}
         onSaveLabels={handleSaveLabels}
         onLoadLabels={handleLoadLabels}
-        onClearLabels={clearLabels}
+        onClearLabels={() => { setLoop(null); clearLabels(); }}
         onPlay={() => play()}
         onPause={pause}
         onExport={handleExport}
@@ -542,10 +479,10 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
             viewRange={viewRange}
             duration={audioInfo?.duration ?? 0}
             playhead={currentTime}
+            colors={{ playhead: "#16A34A" }}
             labels={labels}
             selectedId={selectedId}
             overlappingIds={overlappingIds}
-            silenceRegions={silenceRegions}
             loopRange={loopRange}
             onSeek={handleSeek}
             onRegionSelected={handleRegionSelected}
@@ -568,23 +505,16 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         selectedId={selectedId}
         overlappingIds={overlappingIds}
         onSelect={(id) => {
-          setSelectedId(id);
+          // 点击卡片：仅选中并播放，不改动视图缩放（定位视图请用卡片上的「定位」按钮）
           const label = labels.find((l) => l.id === id);
-          if (label) {
-            const pad = (label.end - label.start) * 0.2;
-            setViewRange({ startSec: Math.max(0, label.start - pad), endSec: label.end + pad });
-            if (loopRange) {
-              // loop 模式：切换 loop 区间并从头播
-              setLoop([label.start, label.end]);
-              seek(label.start);
-              play(label.start);
-            } else {
-              // 非 loop 模式：播放片段到终点自动停
-              playSegment(label.start, label.end);
-            }
-          }
+          if (label) selectLabel(label, false);
         }}
         onRemove={(id) => {
+          const label = labels.find((l) => l.id === id);
+          // 若正在循环的恰是被删片段，清掉回环：去掉高亮背景，让播放正常走下去
+          if (label && loopRange && loopRange[0] === label.start && loopRange[1] === label.end) {
+            setLoop(null);
+          }
           removeLabel(id);
           if (selectedId === id) setSelectedId(null);
         }}
@@ -604,6 +534,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
           }}
         />
       )}
+
+      {/* 快捷键帮助弹窗 */}
+      {showHelp && <ShortcutModal onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

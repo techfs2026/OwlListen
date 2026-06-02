@@ -2,7 +2,6 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { useWebGL } from "@/hooks/useWebGL";
 import type { Label, RenderData, ViewRange, WaveformColors } from "@/types/waveform";
 import { DEFAULT_COLORS } from "@/types/waveform";
-import type { SilenceRegion } from "@/hooks/useWebGL";
 
 interface WaveformCanvasProps {
   data: RenderData | null;
@@ -13,7 +12,6 @@ interface WaveformCanvasProps {
   selectedId?: string | null;
   overlappingIds?: Set<string>;
   colors?: Partial<WaveformColors>;
-  silenceRegions?: SilenceRegion[];
   loopRange?: [number, number] | null;
   onSeek: (sec: number) => void;
   onRegionSelected: (start: number, end: number) => void;
@@ -42,7 +40,6 @@ export function WaveformCanvas({
   selectedId = null,
   overlappingIds,
   colors: colorOverrides,
-  silenceRegions,
   loopRange,
   onSeek,
   onRegionSelected,
@@ -244,10 +241,9 @@ export function WaveformCanvas({
       dragRange: dragDisplay,
       labels: normalizedLabels,
       colors,
-      silenceRegions,
       loopRange: normalizedLoop,
     });
-  }, [data, playhead, duration, labels, selectedId, dragDisplay, colors, silenceRegions, loopRange, render, secToRatio]);
+  }, [data, playhead, duration, labels, selectedId, dragDisplay, colors, loopRange, render, secToRatio]);
 
   return (
     <canvas

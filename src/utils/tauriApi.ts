@@ -53,7 +53,7 @@ export interface ExportOptions {
   labels: LabelData[];
   /** 导出 ZIP 保存路径 */
   outputPath: string;
-  /** Whisper 模型大小,默认 "base" */
+  /** Whisper 模型大小,默认 "small" */
   whisperModel?: string;
 }
 

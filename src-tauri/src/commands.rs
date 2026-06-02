@@ -397,7 +397,7 @@ fn get_or_load_whisper_ctx<'a>(
         let model_path = model_path_for(&app, model);
         if !model_path.exists() {
             return Err(format!(
-                "Whisper 模型文件不存在：{}\n请运行 scripts/download_model.sh {} 下载",
+                "Whisper 模型不存在：{}\n（模型随应用打包在 Resources/whisper-models/，无需用户自行下载；开发环境请将 ggml-{}.en.bin 放入 src-tauri/whisper-models/）",
                 model_path.display(),
                 model
             ));
@@ -430,7 +430,7 @@ pub fn transcribe_recording(
 ) -> Result<String, String> {
     use std::io::Write;
 
-    let model = model.unwrap_or_else(|| "base".to_string());
+    let model = model.unwrap_or_else(|| "small".to_string());
 
     if audio_bytes.is_empty() {
         return Err("Empty audio data".into());

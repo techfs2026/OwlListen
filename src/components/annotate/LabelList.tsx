@@ -130,8 +130,8 @@ const s: Record<string, React.CSSProperties> = {
     padding: "14px 18px",
     background: C.paper2,
     borderTop: `0.5px solid ${C.border}`,
-    minHeight: 240,
-    maxHeight: 290,
+    minHeight: 265,
+    maxHeight: 315,
     alignItems: "stretch",
   },
   empty: {

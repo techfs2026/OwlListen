@@ -28,20 +28,12 @@ void main() {
 
 // ── 渲染参数 ─────────────────────────────────────────────────────────────────
 
-export interface SilenceRegion {
-  /** 归一化坐标 0~1，相对于整首音频 */
-  startRatio: number;
-  endRatio: number;
-}
-
 export interface RenderParams {
   data: RenderData | null;
   playhead: number;
   dragRange: [number, number] | null;
   labels: Array<{ start: number; end: number; selected?: boolean; overlapping?: boolean }>;
   colors: WaveformColors;
-  /** 静音区间（归一化，相对于当前 viewRange） */
-  silenceRegions?: SilenceRegion[];
   /** 正在回环的区间（归一化，相对于当前 viewRange），高亮显示 */
   loopRange?: [number, number] | null;
 }
@@ -99,7 +91,7 @@ export function useWebGL(): UseWebGLReturn {
     if (!res || !canvas) return;
 
     const { gl, program, vao, vbo } = res;
-    const { data, playhead, dragRange, labels, colors, silenceRegions, loopRange } = params;
+    const { data, playhead, dragRange, labels, colors, loopRange } = params;
 
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.clientWidth * dpr;
@@ -125,12 +117,7 @@ export function useWebGL(): UseWebGLReturn {
     gl.uniformMatrix4fv(uMatrix, false, orthoMatrix(w, h));
     gl.uniform1f(uPointSize, 1.0);
 
-    // ── 0. 静音条带（最底层，波形之下）────────────────────────────────────
-    if (silenceRegions && silenceRegions.length > 0) {
-      drawSilenceBands(gl, vbo, uColor, w, h, silenceRegions);
-    }
-
-    // ── 0b. 回环高亮区间 ───────────────────────────────────────────────────
+    // ── 0. 回环高亮区间 ───────────────────────────────────────────────────
     if (loopRange) {
       const [ls, le] = loopRange;
       const lx = ls * w;
@@ -165,10 +152,12 @@ export function useWebGL(): UseWebGLReturn {
 
     // ── 3. 播放头 ─────────────────────────────────────────────────────────
     if (playhead >= 0 && playhead <= 1) {
-      const px = playhead * w;
+      const halfW = 1.5; // 3px 宽，比原来更醒目
+      // 夹紧到画布内，保证 playhead=0（刚加载在最左缘）时整条仍可见
+      const px = Math.min(Math.max(playhead * w, halfW), w - halfW);
       const phc = hexToVec4(colors.playhead);
       gl.uniform4f(uColor, phc[0], phc[1], phc[2], 1.0);
-      uploadAndDraw(gl, vbo, makeRect(px - 1, 0, px + 1, h), gl.TRIANGLES);
+      uploadAndDraw(gl, vbo, makeRect(px - halfW, 0, px + halfW, h), gl.TRIANGLES);
     }
 
     gl.bindVertexArray(null);
@@ -176,32 +165,6 @@ export function useWebGL(): UseWebGLReturn {
   }, []);
 
   return { canvasRef, render };
-}
-
-// ── 静音条带 ──────────────────────────────────────────────────────────────────
-
-function drawSilenceBands(
-  gl: WebGL2RenderingContext,
-  vbo: WebGLBuffer,
-  uColor: WebGLUniformLocation | null,
-  w: number,
-  h: number,
-  regions: SilenceRegion[],
-) {
-  // 淡灰色半透明，不干扰波形阅读
-  for (const r of regions) {
-    const lx = r.startRatio * w;
-    const rx = r.endRatio * w;
-    if (rx - lx < 0.5) continue; // 太窄的不画，避免噪点
-
-    // 填充：柔和的灰色
-    gl.uniform4f(uColor, 0.55, 0.58, 0.63, 0.18);
-    uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
-
-    // 两侧虚边（用短线段模拟虚线感，只画两条实线但颜色很淡）
-    gl.uniform4f(uColor, 0.55, 0.58, 0.63, 0.35);
-    uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
-  }
 }
 
 // ── 标签 / 拖拽选区 ──────────────────────────────────────────────────────────

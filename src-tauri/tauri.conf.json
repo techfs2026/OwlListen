@@ -46,7 +46,7 @@
       "infoPlist": "./Info.plist"
     },
     "resources": [
-      "whisper-models/*"
+      "whisper-models/ggml-small.en.bin"
     ]
   }
 }
