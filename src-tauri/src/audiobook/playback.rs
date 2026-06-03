@@ -9,19 +9,26 @@
 ///     │  play/pause        → cpal play/pause
 ///     ↓
 /// decode线程（FFmpeg）
-///     │  检测 seek_target → av_seek_frame → 重建 atempo + resampler
+///     │  检测 seek_target → av_seek_frame → 重建 atempo
 ///     │  检测 speed_gen 变化 → 重建 atempo（rate 改变需要新 filter graph）
-///     │  解码 → atempo 变速不变调 → resampler 统一为 mono/output_rate
+///     │  解码 → atempo 变速不变调 + 降混为 mono（采样率保持源采样率）
 ///     │  push 到 SpscRing
 ///     ↓
 /// SpscRing（自己实现的 lock-free SPSC ring buffer）
 ///     ↓
-/// cpal output stream callback
+/// cpal output stream callback（输出流配在源采样率上）
 ///     │  检测 read_gen != write_gen → drain ring → 切换 origin → 淡入
 ///     │  正常 pop → 应用淡入包络 → 写入 interleaved 输出 buffer
 ///     ↓
-/// 硬件输出（macOS CoreAudio / Windows WASAPI / Linux ALSA，由 cpal 抽象）
+/// 硬件输出（macOS CoreAudio / Windows WASAPI / Linux ALSA）
+///     └ 源采样率→硬件采样率的转换交给操作系统音频层，应用内不做重采样
 /// ```
+///
+/// # 不做应用层重采样
+///
+/// 有声书按自身采样率播放：cpal 输出流直接配在源采样率（如 22.05kHz），
+/// 设备硬件采样率（如 48kHz）的差异由操作系统音频层负责转换。
+/// 这样既省去一条容易出错的重采样管线，也保证音高/语速完全正确。
 ///
 /// # seek 不爆音
 ///
@@ -33,7 +40,8 @@
 ///
 /// # 变速不变调
 ///
-/// 用 FFmpeg 的 atempo filter，在 decode 线程的解码 → resampler 之间。
+/// 用 FFmpeg 的 atempo filter，在 decode 线程解码之后。
+/// atempo 同时通过 aformat 把声道降混为 mono（采样率保持不变）。
 /// rate 改变时（用户切换速率档位），需要重建 atempo filter graph 并 flush。
 /// atempo 单段范围 0.5~100，目前需求 [0.5 ~ 1.75] 完全覆盖。
 ///
@@ -208,6 +216,11 @@ impl PlaybackEngine {
         let chapter_idx = chapter_index.min(chapters.len().saturating_sub(1));
         let abs_start = chapters[chapter_idx].start_sec + position_sec.max(0.0);
 
+        // 有声书按自身采样率播放，不做应用层重采样：
+        // cpal 输出流直接配置成源采样率，硬件采样率的差异交给操作系统音频层
+        // （macOS CoreAudio / Windows WASAPI 等）自己转换。
+        let src_rate = probe_audio_rate(path)?;
+
         // ── cpal 输出设备 ─────────────────────────────────────────────────────
         let host = cpal::default_host();
         let device = host
@@ -216,10 +229,20 @@ impl PlaybackEngine {
         let supported = device
             .default_output_config()
             .context("default_output_config")?;
-        let output_sample_rate: u32 = supported.sample_rate().into();
         let output_channels = supported.channels();
+        let output_sample_rate: u32 = src_rate;
 
-        log::info!("PlaybackEngine: rate={output_sample_rate} channels={output_channels}");
+        // 用设备的声道数 + 源采样率组成输出配置（cpal 0.17 里 SampleRate 即 u32）
+        let stream_config = cpal::StreamConfig {
+            channels: output_channels,
+            sample_rate: src_rate,
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        log::info!(
+            "PlaybackEngine: src_rate={src_rate} channels={output_channels} (device default rate was {})",
+            supported.sample_rate(),
+        );
 
         // ── Shared ────────────────────────────────────────────────────────────
         let cap = (output_sample_rate as f32 * RING_SECONDS) as usize;
@@ -248,7 +271,7 @@ impl PlaybackEngine {
         // ── cpal stream ───────────────────────────────────────────────────────
         let stream = build_stream(
             &device,
-            &supported.config(),
+            &stream_config,
             output_channels,
             shared.clone(),
         )?;
@@ -268,7 +291,6 @@ impl PlaybackEngine {
                     decode_chapters,
                     chapter_idx,
                     abs_start,
-                    output_sample_rate,
                     decode_shared,
                 ) {
                     log::error!("decode thread error: {e:?}");
@@ -401,6 +423,20 @@ impl Drop for PlaybackEngine {
 
 // ── cpal callback ─────────────────────────────────────────────────────────────
 
+/// 读取音频流的采样率（用于把 cpal 输出流配置成源采样率，省去应用层重采样）。
+fn probe_audio_rate(path: &str) -> Result<u32> {
+    let ictx = ffmpeg::format::input(&path).with_context(|| format!("probe open: {path}"))?;
+    let stream = ictx
+        .streams()
+        .best(ffmpeg::media::Type::Audio)
+        .ok_or_else(|| anyhow!("no audio stream"))?;
+    let dec = ffmpeg::codec::Context::from_parameters(stream.parameters())?
+        .decoder()
+        .audio()?;
+    let rate = if dec.rate() > 0 { dec.rate() } else { 48000 };
+    Ok(rate)
+}
+
 fn build_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -501,7 +537,6 @@ fn decode_loop(
     chapters: Arc<Vec<Chapter>>,
     initial_chapter_idx: usize,
     initial_seek_sec: f64,
-    output_rate: u32,
     shared: Arc<Shared>,
 ) -> Result<()> {
     log::info!("decode_loop: opening {path}");
@@ -548,14 +583,7 @@ fn decode_loop(
         }
     };
 
-    log::info!("decode_loop: creating resampler...");
-    let mut resampler = make_resampler(
-        atempo.output_format(),
-        atempo.output_layout(),
-        atempo.output_rate(),
-        output_rate,
-    )?;
-    log::info!("decode_loop: resampler created");
+    // 不再有应用层重采样：atempo 直接输出 mono/源采样率，cpal 流也配在源采样率上。
 
     let mut current_chapter_end = chapters[initial_chapter_idx].end_sec;
     log::info!("decode_loop: initial seek to {initial_seek_sec:.2}s");
@@ -570,7 +598,6 @@ fn decode_loop(
 
     let mut decoded = ffmpeg::frame::Audio::empty();
     let mut filtered = ffmpeg::frame::Audio::empty();
-    let mut resampled = ffmpeg::frame::Audio::empty();
     let mut last_pos_sec = initial_seek_sec;
     let mut skip_until: Option<f64> = Some(initial_seek_sec);
 
@@ -586,12 +613,6 @@ fn decode_loop(
             seek_to(&mut ictx, &mut decoder, stream_index, stream_tb_f, target)?;
             current_speed = shared.speed();
             atempo = AtempoFilter::new(src_format, src_layout, src_rate, current_speed)?;
-            resampler = make_resampler(
-                atempo.output_format(),
-                atempo.output_layout(),
-                atempo.output_rate(),
-                output_rate,
-            )?;
             shared
                 .decoder_speed_gen
                 .store(shared.speed_gen.load(Ordering::Acquire), Ordering::Release);
@@ -607,28 +628,22 @@ fn decode_loop(
         if shared.decoder_speed_gen.load(Ordering::Acquire) != cur_speed_gen {
             current_speed = shared.speed();
             atempo = AtempoFilter::new(src_format, src_layout, src_rate, current_speed)?;
-            resampler = make_resampler(
-                atempo.output_format(),
-                atempo.output_layout(),
-                atempo.output_rate(),
-                output_rate,
-            )?;
             shared
                 .decoder_speed_gen
                 .store(cur_speed_gen, Ordering::Release);
             log::debug!("decode: speed → {current_speed}");
         }
 
+        // 播完当前章就停：标记完成并 park，由前端在 playback-chapter-ended 事件里暂停。
+        // 用户点下一章/上一章时，do_seek 会重置 chapter_decode_done 并唤醒解码线程。
         if last_pos_sec >= current_chapter_end {
-            log::warn!(
-                "decode: chapter already done at start! last_pos={last_pos_sec:.2} end={current_chapter_end:.2} initial_seek={initial_seek_sec:.2}"
-            );
             shared.chapter_decode_done.store(true, Ordering::Release);
             park_decoder(&shared);
             continue 'main;
         }
 
-        if shared.ring.vacant() < (output_rate as usize / 8) {
+        // 背压：ring 快满（剩余不到容量的 1/64，约 1/8 秒）时让解码线程歇着
+        if shared.ring.vacant() < shared.ring.capacity / 64 {
             park_decoder(&shared);
             continue 'main;
         }
@@ -667,22 +682,8 @@ fn decode_loop(
                 loop {
                     match atempo.receive(&mut filtered) {
                         Ok(true) => {
-                            static F: std::sync::atomic::AtomicU64 =
-                                std::sync::atomic::AtomicU64::new(0);
-                            let n = F.fetch_add(1, Ordering::Relaxed);
-                            if n < 3 {
-                                log::info!(
-                                    "filtered frame #{n}: rate={} fmt={:?} layout=0x{:x} samples={} channels={}",
-                                    filtered.rate(),
-                                    filtered.format(),
-                                    filtered.channel_layout().bits(),
-                                    filtered.samples(),
-                                    filtered.channels(),
-                                );
-                            }
-
-                            resampler.run(&filtered, &mut resampled)?;
-                            push_samples(&resampled, &shared)?;
+                            // atempo 已输出 mono/fltp/源采样率，直接推入 ring
+                            push_samples(&filtered, &shared)?;
                         }
                         Ok(false) => break,
                         Err(e) => {
@@ -700,14 +701,12 @@ fn decode_loop(
                     while decoder.receive_frame(&mut decoded).is_ok() {
                         atempo.send(&decoded)?;
                         while atempo.receive(&mut filtered)? {
-                            resampler.run(&filtered, &mut resampled)?;
-                            push_samples(&resampled, &shared)?;
+                            push_samples(&filtered, &shared)?;
                         }
                     }
                     atempo.send_eof()?;
                     while atempo.receive(&mut filtered)? {
-                        resampler.run(&filtered, &mut resampled)?;
-                        push_samples(&resampled, &shared)?;
+                        push_samples(&filtered, &shared)?;
                     }
                     shared.chapter_decode_done.store(true, Ordering::Release);
                     park_decoder(&shared);
@@ -735,9 +734,6 @@ fn decode_loop(
 /// 为了 1.0 时绝对零开销，可以加一个 bypass 分支，但当前实现简单一致。
 struct AtempoFilter {
     graph: ffmpeg::filter::Graph,
-    src_rate: u32,
-    src_layout: ffmpeg::channel_layout::ChannelLayout,
-    src_format: ffmpeg::format::Sample,
 }
 
 impl AtempoFilter {
@@ -776,34 +772,19 @@ impl AtempoFilter {
             )
             .context("add abuffersink")?;
 
-        // 拼接：in → atempo=rate=X → out
+        // 拼接：in → atempo=rate=X → 降混为单声道 fltp（采样率不变）→ out
+        // aformat 里把 channel_layouts 定为 mono，让滤镜图自动插入降混，
+        // 这样输出帧就是 mono/fltp/源采样率，可直接送入 cpal，无需重采样。
         let spec = format!(
-            "[in]atempo={speed},aformat=sample_fmts=fltp:sample_rates={rate}:channel_layouts=0x{layout:x}[out]",
+            "[in]atempo={speed},aformat=sample_fmts=fltp:sample_rates={rate}:channel_layouts=0x{mono:x}[out]",
             speed = speed,
             rate = src_rate,
-            layout = src_layout.bits(),
+            mono = ffmpeg::channel_layout::ChannelLayout::MONO.bits(),
         );
         graph.output("in", 0)?.input("out", 0)?.parse(&spec)?;
         graph.validate().context("filter graph validate")?;
 
-        Ok(Self {
-            graph,
-            src_rate,
-            src_layout,
-            src_format,
-        })
-    }
-
-    fn output_rate(&self) -> u32 {
-        self.src_rate // atempo 不改采样率
-    }
-
-    fn output_layout(&self) -> ffmpeg::channel_layout::ChannelLayout {
-        self.src_layout
-    }
-
-    fn output_format(&self) -> ffmpeg::format::Sample {
-        self.src_format
+        Ok(Self { graph })
     }
 
     fn send(&mut self, frame: &ffmpeg::frame::Audio) -> Result<()> {
@@ -861,23 +842,6 @@ fn sample_fmt_name(fmt: ffmpeg::format::Sample) -> &'static str {
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────────────────────
-
-fn make_resampler(
-    src_fmt: ffmpeg::format::Sample,
-    src_layout: ffmpeg::channel_layout::ChannelLayout,
-    src_rate: u32,
-    dst_rate: u32,
-) -> Result<ffmpeg::software::resampling::Context> {
-    ffmpeg::software::resampling::Context::get(
-        src_fmt,
-        src_layout,
-        src_rate,
-        ffmpeg::format::Sample::F32(ffmpeg::format::sample::Type::Planar),
-        ffmpeg::channel_layout::ChannelLayout::MONO,
-        dst_rate,
-    )
-    .map_err(|e| anyhow!("resampler: {e}"))
-}
 
 fn seek_to(
     ictx: &mut ffmpeg::format::context::Input,
