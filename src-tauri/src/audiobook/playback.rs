@@ -634,10 +634,28 @@ fn decode_loop(
             log::debug!("decode: speed → {current_speed}");
         }
 
+        // 有未被播放端消费的 seek（write_gen 已自增，但 cpal 还没清环 + 切 origin）时，
+        // 解码先别继续生产、前进。否则：暂停状态下点章节会 seek 到章首并把 8s 环填满，
+        // 但按下播放时 cpal 第一帧才检测到 gen 变化、清空整个环（丢掉刚填的章首音频），
+        // 而解码位置此时已前进了 ~8s，于是"下一章从中间某处开始播放"。
+        // gen 由 cpal 回调在播放时确认（read_gen 追上 write_gen），所以这里只在
+        // “seek 后尚未真正开始播放”的窗口内阻塞，正常播放期间 read==write 不受影响。
+        if shared.read_gen.load(Ordering::Acquire) != shared.write_gen.load(Ordering::Acquire) {
+            park_decoder(&shared);
+            continue 'main;
+        }
+
         // 播完当前章就停：标记完成并 park，由前端在 playback-chapter-ended 事件里暂停。
         // 用户点下一章/上一章时，do_seek 会重置 chapter_decode_done 并唤醒解码线程。
         if last_pos_sec >= current_chapter_end {
-            shared.chapter_decode_done.store(true, Ordering::Release);
+            // 第一次到章末时把 atempo 内部缓冲 flush 出来，否则尾巴 ~一帧音频会丢。
+            if !shared.chapter_decode_done.load(Ordering::Acquire) {
+                atempo.send_eof().ok();
+                while atempo.receive(&mut filtered).unwrap_or(false) {
+                    push_samples(&filtered, &shared)?;
+                }
+                shared.chapter_decode_done.store(true, Ordering::Release);
+            }
             park_decoder(&shared);
             continue 'main;
         }
@@ -662,6 +680,22 @@ fn decode_loop(
                         continue 'main;
                     }
                     skip_until = None;
+                }
+
+                // 到达章节结尾：这一帧已经属于下一章，不要推进 ring，
+                // 否则播放会越界进下一章、进度/locate 跳到下一章，
+                // 用户点"下一章"时还会因 index 已自增而多跳一章。
+                if last_pos_sec >= current_chapter_end {
+                    // flush atempo 内部缓冲，找回尾巴音频，再标记完成并 park。
+                    if !shared.chapter_decode_done.load(Ordering::Acquire) {
+                        atempo.send_eof().ok();
+                        while atempo.receive(&mut filtered).unwrap_or(false) {
+                            push_samples(&filtered, &shared)?;
+                        }
+                        shared.chapter_decode_done.store(true, Ordering::Release);
+                    }
+                    park_decoder(&shared);
+                    continue 'main;
                 }
 
                 static FRAME_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -998,12 +1032,28 @@ fn progress_loop(
         let played_source_sec = played_output_samples as f64 / output_rate as f64 * speed;
         let abs_sec = *shared.origin_sec.lock().unwrap() + played_source_sec;
 
-        let (chapter_idx, chapter_pos) = locate_chapter(&chapters, abs_sec);
+        // 用引擎正在解码的章节作为权威 index：解码线程始终停在章末，
+        // current_chapter_idx 在 seek/open 时设定，章内播放期间恒定。
+        // 不用 locate_chapter，避免章末越界一帧时进度跳到下一章。
+        let chapter_idx = shared
+            .current_chapter_idx
+            .load(Ordering::Acquire)
+            .min(chapters.len().saturating_sub(1));
+        let ch = &chapters[chapter_idx];
+        let ch_dur = (ch.end_sec - ch.start_sec).max(0.0);
         let is_playing = shared.playing.load(Ordering::Acquire);
 
         let decode_done = shared.chapter_decode_done.load(Ordering::Acquire);
         let ring_empty = shared.ring.occupied() == 0;
         let has_played = popped > baseline;
+
+        // 章节完整播完时把进度吸附到章末：atempo 内部 latency 会让按 popped 估算的
+        // 位置比章末短 ~50ms，前端 floor 后会显示成"差 1 秒"（如 17:30 vs 17:31）。
+        let chapter_pos = if decode_done && ring_empty && has_played {
+            ch_dur
+        } else {
+            (abs_sec - ch.start_sec).clamp(0.0, ch_dur)
+        };
 
         if decode_done && ring_empty && is_playing && has_played {
             let cur = shared.current_chapter_idx.load(Ordering::Acquire);
