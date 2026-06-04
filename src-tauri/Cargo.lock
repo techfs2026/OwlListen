@@ -2057,30 +2057,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "langlisten"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "cpal",
- "env_logger",
- "ffmpeg-next",
- "libc",
- "log",
- "rayon",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "thiserror 1.0.69",
- "whisper-rs",
- "wide",
- "zip",
-]
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2608,6 +2584,30 @@ name = "option-ext"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
+
+[[package]]
+name = "owllisten"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "cpal",
+ "env_logger",
+ "ffmpeg-next",
+ "libc",
+ "log",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "thiserror 1.0.69",
+ "whisper-rs",
+ "wide",
+ "zip",
+]
 
 [[package]]
 name = "pango"

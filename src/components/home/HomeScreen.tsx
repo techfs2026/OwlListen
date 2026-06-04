@@ -15,7 +15,7 @@ export function HomeScreen({ onSelect }: HomeScreenProps) {
       <div style={s.content}>
         <div style={s.logoWrap}>
           <div style={s.logoEyebrow}>a listening practice platform</div>
-          <h1 style={s.logoTitle}>LangListen</h1>
+          <h1 style={s.logoTitle}>OwlListen</h1>
         </div>
 
         <div style={s.cards}>
