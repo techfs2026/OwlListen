@@ -4,7 +4,6 @@ import { CloseIcon } from "./icons";
 import "./EmptyState.scss";
 
 interface EmptyStateProps {
-  onOpen: () => void;
   recentBooks: RecentBook[];
   onOpenRecent: (book: RecentBook) => void;
   onRemoveRecent: (book: RecentBook) => void;
@@ -15,7 +14,7 @@ function pathBasename(path: string): string {
 }
 
 export function EmptyState({
-  onOpen, recentBooks, onOpenRecent, onRemoveRecent,
+  recentBooks, onOpenRecent, onRemoveRecent,
 }: EmptyStateProps) {
   const [hoverPath, setHoverPath] = useState<string | null>(null);
 
@@ -24,10 +23,7 @@ export function EmptyState({
       <div className="empty-state__icon">📖</div>
       <p className="empty-state__title">还没有打开有声书</p>
       <p className="empty-state__hint">支持 M4B</p>
-      <button className="btn btn--primary btn--lg empty-state__cta" onClick={onOpen}>
-        选择文件
-      </button>
-      <p className="empty-state__drag">或直接拖入文件</p>
+      <p className="empty-state__drag">从顶部「打开有声书」选择，或直接拖入文件</p>
 
       {recentBooks.length > 0 && (
         <div className="empty-state__recent">

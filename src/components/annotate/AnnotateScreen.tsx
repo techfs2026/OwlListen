@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { C } from "@/styles";
 import { AnnotateToolbar } from "./AnnotateToolbar";
 import { WaveformCanvas } from "./WaveformCanvas";
 import { TimeAxis } from "./TimeAxis";
@@ -557,17 +556,17 @@ function EmptyState({ icon, title, hint, spinner }: {
       {spinner ? (
         <div style={{
           width: 22, height: 22,
-          border: `2px solid ${C.border}`,
-          borderTop: `2px solid ${C.blue}`,
+          border: `2px solid var(--color-border)`,
+          borderTop: `2px solid var(--color-brand)`,
           borderRadius: "50%",
           animation: "spin 0.8s linear infinite",
           marginBottom: 4,
         }} />
       ) : (
-        <div style={{ fontSize: 32, color: C.border2, lineHeight: 1, marginBottom: 4 }}>{icon}</div>
+        <div style={{ fontSize: 32, color: "var(--color-border-2)", lineHeight: 1, marginBottom: 4 }}>{icon}</div>
       )}
-      <p style={{ fontSize: 14, color: C.ink3, fontWeight: 500 }}>{title}</p>
-      {hint && <p style={{ fontSize: 12, color: C.border2 }}>{hint}</p>}
+      <p style={{ fontSize: 14, color: "var(--color-ink-3)", fontWeight: 500 }}>{title}</p>
+      {hint && <p style={{ fontSize: 12, color: "var(--color-border-2)" }}>{hint}</p>}
     </div>
   );
 }
@@ -578,7 +577,7 @@ const s: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     width: "100vw",
     height: "100vh",
-    background: C.paper2,
+    background: "var(--color-paper-2)",
     overflow: "hidden",
     userSelect: "none",
   },
@@ -587,7 +586,7 @@ const s: Record<string, React.CSSProperties> = {
     minHeight: 160,
     position: "relative",
     overflow: "hidden",
-    background: C.paper,
-    borderBottom: `0.5px solid ${C.border}`,
+    background: "var(--color-paper)",
+    borderBottom: `0.5px solid var(--color-border)`,
   },
 };

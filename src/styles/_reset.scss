@@ -8,8 +8,28 @@ body {
   height: 100%;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  // 注意：background / color / font-family / overflow 已经由 styles.ts 的
-  // injectGlobalStyles() 注入。这里不重复设置，避免 SCSS 与运行时注入打架。
+  background: var(--color-paper-2);
+  color: var(--color-ink-1);
+  font-family: var(--font-sans);
+  overflow: hidden;
 }
 
 button, input, select, textarea { font: inherit; }
+
+button {
+  font-family: var(--font-sans);
+  cursor: pointer;
+  &:disabled { opacity: 0.38; cursor: not-allowed; }
+}
+
+input, textarea { font-family: var(--font-sans); }
+textarea { resize: none; }
+
+// 全局细滚动条
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-2);
+  border-radius: 2px;
+  &:hover { background: var(--color-ink-3); }
+}

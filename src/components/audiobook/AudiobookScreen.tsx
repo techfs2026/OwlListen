@@ -207,7 +207,6 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
           </>
         ) : (
           <EmptyState
-            onOpen={handleOpenBook}
             recentBooks={localRecent}
             onOpenRecent={handleOpenRecent}
             onRemoveRecent={handleRemoveRecent}

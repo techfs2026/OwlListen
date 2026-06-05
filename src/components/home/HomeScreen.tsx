@@ -1,5 +1,4 @@
 import React from "react";
-import { C, FONT, SHADOW } from "@/styles";
 import { Badge } from "@/components/shared/Primitives";
 
 export type AppMode = "home" | "annotate" | "listen" | "audiobook";
@@ -23,7 +22,7 @@ export function HomeScreen({ onSelect }: HomeScreenProps) {
             badge={<Badge color="blue">第一步 · 标注</Badge>}
             title="初次精听"
             desc="连续听，把没跟上的句子在波形上拖拽框选，选中即自动回环反复攻克；难句攒成错题包，导出带 Whisper 原文的 ZIP。"
-            accentColor={C.blue}
+            accentColor={"var(--color-brand)"}
             features={["拖拽框选断句", "选中即自动回环", "片段备注", "导出 ZIP 错题包"]}
             onClick={() => onSelect("annotate")}
           />
@@ -31,7 +30,7 @@ export function HomeScreen({ onSelect }: HomeScreenProps) {
             badge={<Badge color="green">第二步 · 复习</Badge>}
             title="精听复习"
             desc="导入错题包，逐句反复听写，Diff 对照原文查漏补缺，没攻克的句子随手标记重听。"
-            accentColor={C.green}
+            accentColor={"var(--color-success)"}
             features={["逐句听写", "原文 Diff 对照", "标记重听", "全键盘操作"]}
             onClick={() => onSelect("listen")}
           />
@@ -67,8 +66,8 @@ function ModeCard({ badge, title, desc, accentColor, features, onClick }: ModeCa
       onMouseLeave={() => setHovered(false)}
       style={{
         ...s.card,
-        borderColor: hovered ? accentColor + "66" : C.border2,
-        boxShadow: hovered ? `0 8px 32px ${accentColor}18, ${SHADOW.md}` : SHADOW.md,
+        borderColor: hovered ? accentColor + "66" : "var(--color-border-2)",
+        boxShadow: hovered ? `0 8px 32px ${accentColor}18, var(--shadow-md)` : "var(--shadow-md)",
         transform: hovered ? "translateY(-2px)" : "none",
       }}
     >
@@ -85,7 +84,7 @@ function ModeCard({ badge, title, desc, accentColor, features, onClick }: ModeCa
             </li>
           ))}
         </ul>
-        <div style={{ ...s.cardArrow, color: hovered ? accentColor : C.border2 }}>→</div>
+        <div style={{ ...s.cardArrow, color: hovered ? accentColor : "var(--color-border-2)" }}>→</div>
       </div>
     </div>
   );
@@ -95,13 +94,13 @@ const s: Record<string, React.CSSProperties> = {
   root: {
     width: "100vw", height: "100vh",
     display: "flex", alignItems: "center", justifyContent: "center",
-    background: C.paper2, position: "relative", overflow: "hidden",
+    background: "var(--color-paper-2)", position: "relative", overflow: "hidden",
   },
   texture: {
     position: "absolute", inset: 0,
     backgroundImage: `
-      linear-gradient(${C.border} 1px, transparent 1px),
-      linear-gradient(90deg, ${C.border} 1px, transparent 1px)
+      linear-gradient(var(--color-border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-border) 1px, transparent 1px)
     `,
     backgroundSize: "40px 40px",
     opacity: 0.6, pointerEvents: "none",
@@ -112,14 +111,14 @@ const s: Record<string, React.CSSProperties> = {
   },
   logoWrap: { textAlign: "center" },
   logoEyebrow: {
-    fontFamily: FONT.mono, fontSize: 12, letterSpacing: "0.14em",
-    textTransform: "uppercase" as const, color: C.ink3, marginBottom: 10,
+    fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: "0.14em",
+    textTransform: "uppercase" as const, color: "var(--color-ink-3)", marginBottom: 10,
   },
   logoTitle: {
-    fontFamily: FONT.serif, fontSize: 46, fontWeight: 400,
-    color: C.ink, letterSpacing: "-0.5px", lineHeight: 1.15, marginBottom: 10,
+    fontFamily: "var(--font-serif)", fontSize: 46, fontWeight: 400,
+    color: "var(--color-ink-1)", letterSpacing: "-0.5px", lineHeight: 1.15, marginBottom: 10,
   },
-  logoSub: { fontSize: 15, color: C.ink3, fontWeight: 300 },
+  logoSub: { fontSize: 15, color: "var(--color-ink-3)", fontWeight: 300 },
   // 三列网格
   cards: {
     display: "grid",
@@ -128,20 +127,20 @@ const s: Record<string, React.CSSProperties> = {
     width: 1020,
   },
   card: {
-    background: C.paper, border: `1px solid ${C.border2}`, borderRadius: 16,
+    background: "var(--color-paper)", border: `1px solid var(--color-border-2)`, borderRadius: 16,
     cursor: "pointer", position: "relative", overflow: "hidden",
     transition: "border-color 0.2s, box-shadow 0.2s, transform 0.2s",
   },
   stripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
   cardInner: { padding: "28px 26px 24px 32px", display: "flex", flexDirection: "column" as const },
-  cardTitle: { fontFamily: FONT.sans, fontSize: 18, fontWeight: 500, marginBottom: 10 },
-  cardDesc: { fontSize: 13, color: C.ink3, lineHeight: 1.65, marginBottom: 16 },
+  cardTitle: { fontFamily: "var(--font-sans)", fontSize: 18, fontWeight: 500, marginBottom: 10 },
+  cardDesc: { fontSize: 13, color: "var(--color-ink-3)", lineHeight: 1.65, marginBottom: 16 },
   featureList: {
     listStyle: "none", display: "flex", flexDirection: "column" as const,
     gap: 6, marginBottom: 20,
   },
-  featureItem: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: C.ink2 },
+  featureItem: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--color-ink-2)" },
   featureDot: { width: 5, height: 5, borderRadius: "50%", flexShrink: 0, opacity: 0.7 },
   cardArrow: { position: "absolute", right: 20, bottom: 18, fontSize: 20, transition: "color 0.2s" },
-  footer: { fontSize: 13, color: C.ink3, fontFamily: FONT.mono, letterSpacing: "0.02em" },
+  footer: { fontSize: 13, color: "var(--color-ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.02em" },
 };

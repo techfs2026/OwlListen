@@ -1,10 +1,9 @@
 // ──────────────────────────────────────────────────────────────────────────
-//  Design Tokens
-//  与 src/styles.ts 中的 C / FONT / SHADOW 数值保持完全一致
-//  其它 SCSS 一律通过 var(--xxx) 引用，不直接写色值
+//  Design Tokens —— 全应用唯一的设计 token 源头
+//  所有样式（SCSS 与 JSX inline）一律通过 var(--xxx) 引用，不直接写色值
 // ──────────────────────────────────────────────────────────────────────────
 
-// Google Fonts —— 与 styles.ts 中保持一致
+// Google Fonts
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap');
 
 :root {
@@ -27,6 +26,10 @@
   --color-brand-hover:  #1640B8;   // 比 brand 稍深一档（styles.ts 没定义，按惯例 -10%）
   --color-brand-soft:   #E8EEFA;   // = C.blueLt
   --color-brand-mid:    #5B7FEA;   // = C.blueMid
+
+  // ── 颜色：有声书强调色（橙）—— 与首页有声书卡片主色一致 ──────────────
+  --color-audiobook:      #F97316;
+  --color-audiobook-soft: #FEEEE0;
 
   // ── 颜色：状态色 ──────────────────────────────────────────────────
   --color-danger:       #C0392B;   // = C.red
@@ -96,7 +99,7 @@
   --z-modal:    1000;
 }
 
-// ── 关键帧（与 styles.ts 中的 injectGlobalStyles 对齐）─────────────────
+// ── 关键帧 ─────────────────────────────────────────────────────────────
 @keyframes spin     { to { transform: rotate(360deg); } }
 @keyframes fadeIn   { from { opacity: 0; transform: translateY(6px); }   to { opacity: 1; transform: none; } }
 @keyframes slideIn  { from { opacity: 0; transform: translateX(-8px); }  to { opacity: 1; transform: none; } }

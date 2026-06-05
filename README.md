@@ -115,7 +115,7 @@ npm run tauri build    # 生产构建
 
 ### Whisper 模型
 
-转写需要本地 GGML 模型，放入仓库根目录的 `whisper-models/`：
+转写需要本地 GGML 模型，放入仓库src-tauri目录的 `whisper-models/`里：
 
 | 模型 | 文件名 | 大小 | 场景 |
 |------|--------|------|------|

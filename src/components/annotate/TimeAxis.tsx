@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { C, FONT } from "@/styles";
 
 interface TimeAxisProps {
   viewRange: { startSec: number; endSec: number };
@@ -42,8 +41,8 @@ export function TimeAxis({ viewRange, width }: TimeAxisProps) {
     <div style={{
       position: "relative",
       height: 24,
-      borderTop: `0.5px solid ${C.border}`,
-      background: C.paper,
+      borderTop: `0.5px solid var(--color-border)`,
+      background: "var(--color-paper)",
       flexShrink: 0,
     }}>
       {ticks.map((t) => {
@@ -59,11 +58,11 @@ export function TimeAxis({ viewRange, width }: TimeAxisProps) {
             alignItems: "center",
             transform: "translateX(-50%)",
           }}>
-            <div style={{ width: 0.5, height: 5, background: C.ink3 }} />
+            <div style={{ width: 0.5, height: 5, background: "var(--color-ink-3)" }} />
             <span style={{
-              fontFamily: FONT.mono,
+              fontFamily: "var(--font-mono)",
               fontSize: 9,
-              color: C.ink3,
+              color: "var(--color-ink-3)",
               marginTop: 2,
               whiteSpace: "nowrap",
               userSelect: "none",

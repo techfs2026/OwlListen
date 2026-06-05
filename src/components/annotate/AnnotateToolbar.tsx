@@ -1,5 +1,4 @@
 import React from "react";
-import { C, FONT } from "@/styles";
 import { Btn, PlayBtn } from "@/components/shared/Primitives";
 import type { AudioInfo, LoadingState } from "@/types/waveform";
 
@@ -113,8 +112,8 @@ const s: Record<string, React.CSSProperties> = {
   shell: {
     display: "flex",
     flexDirection: "column",
-    background: C.paper,
-    borderBottom: `0.5px solid ${C.border}`,
+    background: "var(--color-paper)",
+    borderBottom: `0.5px solid var(--color-border)`,
     flexShrink: 0,
     boxShadow: "0 1px 0 rgba(26,39,68,0.04)",
   },
@@ -127,44 +126,44 @@ const s: Record<string, React.CSSProperties> = {
   },
   divider: {
     height: "0.5px",
-    background: C.border,
+    background: "var(--color-border)",
     margin: "0 16px",
     opacity: 0.5,
   },
   rowSep: {
     width: 1,
     height: 18,
-    background: C.border2,
+    background: "var(--color-border-2)",
     borderRadius: 1,
     flexShrink: 0,
     margin: "0 2px",
   },
   modeTag: {
-    fontFamily: FONT.mono,
+    fontFamily: "var(--font-mono)",
     fontSize: 10,
     letterSpacing: "0.12em",
     textTransform: "uppercase" as const,
-    color: C.blue,
+    color: "var(--color-brand)",
     padding: "2px 7px",
-    background: C.blueLt,
+    background: "var(--color-brand-soft)",
     borderRadius: 4,
   },
   time: {
-    fontFamily: FONT.mono,
+    fontFamily: "var(--font-mono)",
     fontSize: 13,
-    color: C.ink,
+    color: "var(--color-ink-1)",
     letterSpacing: "-0.02em",
     minWidth: 138,
   },
-  timeSep: { color: C.ink3, margin: "0 3px" },
-  meta: { fontSize: 11, color: C.ink3 },
+  timeSep: { color: "var(--color-ink-3)", margin: "0 3px" },
+  meta: { fontSize: 11, color: "var(--color-ink-3)" },
   badge: {
-    fontFamily: FONT.mono,
+    fontFamily: "var(--font-mono)",
     fontSize: 10,
     fontWeight: 500,
-    color: C.blue,
-    background: C.blueLt,
-    border: `0.5px solid ${C.blueMid}44`,
+    color: "var(--color-brand)",
+    background: "var(--color-brand-soft)",
+    border: `0.5px solid #5B7FEA44`,
     borderRadius: 10,
     padding: "2px 8px",
   },
@@ -177,5 +176,5 @@ const s: Record<string, React.CSSProperties> = {
     background: "#D97706",
     animation: "spin 1s linear infinite",
   },
-  error: { fontSize: 12, color: C.red, fontWeight: 500 },
+  error: { fontSize: 12, color: "var(--color-danger)", fontWeight: 500 },
 };

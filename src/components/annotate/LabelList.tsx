@@ -1,5 +1,4 @@
 import React from "react";
-import { C, FONT } from "@/styles";
 import type { Label } from "@/types/waveform";
 
 interface LabelListProps {
@@ -72,19 +71,19 @@ function fmtDur(sec: number): string {
 function LabelCard({ label, index, selected, overlapping, onSelect, onRemove, onJumpTo, onUpdateText }: LabelCardProps) {
   const cardStyle: React.CSSProperties = {
     ...s.card,
-    borderColor: overlapping ? "#FCA5A5" : selected ? C.blue : undefined,
+    borderColor: overlapping ? "#FCA5A5" : selected ? "var(--color-brand)" : undefined,
     boxShadow: overlapping
       ? "0 0 0 2px #FEE2E2"
       : selected
-      ? `0 0 0 2px ${C.blueLt}, 0 1px 3px rgba(26,39,68,0.08)`
+      ? `0 0 0 2px var(--color-brand-soft), 0 1px 3px rgba(26,39,68,0.08)`
       : "0 1px 3px rgba(26,39,68,0.05)",
-    background: overlapping ? "#FFF5F5" : selected ? C.blueLt : C.paper,
+    background: overlapping ? "#FFF5F5" : selected ? "var(--color-brand-soft)" : "var(--color-paper)",
   };
 
   return (
     <div style={cardStyle} onClick={onSelect}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ ...s.cardNum, color: overlapping ? "#DC2626" : selected ? C.blue : C.ink3 }}>#{index}</div>
+        <div style={{ ...s.cardNum, color: overlapping ? "#DC2626" : selected ? "var(--color-brand)" : "var(--color-ink-3)" }}>#{index}</div>
         <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
           {overlapping && <div style={s.overlapBadge}>⚠ 重叠</div>}
           {selected && !overlapping && (
@@ -128,8 +127,8 @@ const s: Record<string, React.CSSProperties> = {
     gap: 10,
     overflowX: "auto",
     padding: "14px 18px",
-    background: C.paper2,
-    borderTop: `0.5px solid ${C.border}`,
+    background: "var(--color-paper-2)",
+    borderTop: `0.5px solid var(--color-border)`,
     minHeight: 265,
     maxHeight: 315,
     alignItems: "stretch",
@@ -140,15 +139,15 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     gap: 10,
-    color: C.ink3,
+    color: "var(--color-ink-3)",
   },
   emptyIcon: { fontSize: 20, letterSpacing: "0.1em" },
-  emptyText: { fontSize: 13, fontFamily: FONT.mono },
+  emptyText: { fontSize: 13, fontFamily: "var(--font-mono)" },
   addHint: {
     flexShrink: 0,
     width: 84,
     height: 96,
-    border: `1px dashed ${C.border2}`,
+    border: `1px dashed var(--color-border-2)`,
     borderRadius: 10,
     display: "flex",
     flexDirection: "column",
@@ -158,14 +157,14 @@ const s: Record<string, React.CSSProperties> = {
     cursor: "default",
     opacity: 0.45,
   },
-  addIcon: { fontSize: 22, color: C.ink3, lineHeight: 1 },
-  addText: { fontSize: 11, color: C.ink3, textAlign: "center", lineHeight: 1.5 },
+  addIcon: { fontSize: 22, color: "var(--color-ink-3)", lineHeight: 1 },
+  addText: { fontSize: 11, color: "var(--color-ink-3)", textAlign: "center", lineHeight: 1.5 },
 
   card: {
     flexShrink: 0,
     alignSelf: "stretch",
     minWidth: 270,
-    border: `0.5px solid ${C.border2}`,
+    border: `0.5px solid var(--color-border-2)`,
     borderRadius: 10,
     padding: "12px 14px",
     display: "flex",
@@ -175,7 +174,7 @@ const s: Record<string, React.CSSProperties> = {
     transition: "box-shadow 0.12s, border-color 0.12s, background 0.12s",
   },
   cardNum: {
-    fontFamily: FONT.mono,
+    fontFamily: "var(--font-mono)",
     fontSize: 22,
     fontWeight: 500,
   },
@@ -184,17 +183,17 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 4,
     fontSize: 10,
-    fontFamily: FONT.mono,
-    color: C.blue,
+    fontFamily: "var(--font-mono)",
+    color: "var(--color-brand)",
     background: "#DBEAFE",
-    border: `0.5px solid ${C.blueMid}55`,
+    border: `0.5px solid #5B7FEA55`,
     borderRadius: 8,
     padding: "2px 7px",
     letterSpacing: "0.04em",
   },
   overlapBadge: {
     fontSize: 10,
-    fontFamily: FONT.mono,
+    fontFamily: "var(--font-mono)",
     color: "#DC2626",
     background: "#FEE2E2",
     border: "0.5px solid #FCA5A5",
@@ -207,7 +206,7 @@ const s: Record<string, React.CSSProperties> = {
     width: 5,
     height: 5,
     borderRadius: "50%",
-    background: C.blue,
+    background: "var(--color-brand)",
     display: "inline-block",
   },
   nudgeHint: {
@@ -215,17 +214,17 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: "center",
     gap: 4,
     fontSize: 10,
-    color: C.ink3,
-    fontFamily: FONT.mono,
+    color: "var(--color-ink-3)",
+    fontFamily: "var(--font-mono)",
     marginTop: -2,
   },
-  nudgeSep: { color: C.border2, fontSize: 10 },
+  nudgeSep: { color: "var(--color-border-2)", fontSize: 10 },
   kbdTiny: {
-    fontFamily: FONT.mono,
+    fontFamily: "var(--font-mono)",
     fontSize: 9,
-    color: C.ink3,
-    background: C.paper,
-    border: `0.5px solid ${C.border2}`,
+    color: "var(--color-ink-3)",
+    background: "var(--color-paper)",
+    border: `0.5px solid var(--color-border-2)`,
     borderRadius: 3,
     padding: "1px 4px",
     lineHeight: 1.2,
@@ -234,18 +233,18 @@ const s: Record<string, React.CSSProperties> = {
     display: "flex",
     alignItems: "center",
     gap: 4,
-    fontFamily: FONT.mono,
+    fontFamily: "var(--font-mono)",
     fontSize: 13,
     flexWrap: "wrap",
   },
-  t: { color: C.ink, fontWeight: 500 },
-  arrow: { color: C.ink3 },
-  dur: { color: C.ink3, fontSize: 11 },
+  t: { color: "var(--color-ink-1)", fontWeight: 500 },
+  arrow: { color: "var(--color-ink-3)" },
+  dur: { color: "var(--color-ink-3)", fontSize: 11 },
   cardInput: {
-    background: C.paper2,
-    border: `0.5px solid ${C.border2}`,
+    background: "var(--color-paper-2)",
+    border: `0.5px solid var(--color-border-2)`,
     borderRadius: 5,
-    color: C.ink2,
+    color: "var(--color-ink-2)",
     fontSize: 14,
     padding: "5px 8px",
     width: "100%",
@@ -255,17 +254,17 @@ const s: Record<string, React.CSSProperties> = {
   actionBtn: {
     flex: 1,
     background: "transparent",
-    border: `0.5px solid ${C.border2}`,
+    border: `0.5px solid var(--color-border-2)`,
     borderRadius: 5,
-    color: C.ink3,
+    color: "var(--color-ink-3)",
     fontSize: 13,
     fontWeight: 500,
     padding: "5px 0",
     cursor: "pointer",
-    fontFamily: FONT.sans,
+    fontFamily: "var(--font-sans)",
   },
   dangerBtn: {
     borderColor: "#FCA5A5",
-    color: C.red,
+    color: "var(--color-danger)",
   },
 };
