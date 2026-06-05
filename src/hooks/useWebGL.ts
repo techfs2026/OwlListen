@@ -1,10 +1,5 @@
 import { useRef, useCallback, useEffect } from "react";
-import type {
-  ChannelData,
-  RenderData,
-  WaveformColors,
-  GlResources,
-} from "@/types/waveform";
+import type { ChannelData, RenderData, WaveformColors, GlResources } from "@/types/waveform";
 
 // ── shaders ──────────────────────────────────────────────────────────────────
 
@@ -123,10 +118,10 @@ export function useWebGL(): UseWebGLReturn {
       const lx = ls * w;
       const rx = le * w;
       // 淡黄绿色背景，区别于 label 的蓝色和 selection 的黄色
-      gl.uniform4f(uColor, 0.18, 0.80, 0.44, 0.12);
+      gl.uniform4f(uColor, 0.18, 0.8, 0.44, 0.12);
       uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
       // 两侧竖线
-      gl.uniform4f(uColor, 0.18, 0.80, 0.44, 0.70);
+      gl.uniform4f(uColor, 0.18, 0.8, 0.44, 0.7);
       uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
     }
 
@@ -140,7 +135,18 @@ export function useWebGL(): UseWebGLReturn {
       const laneAmpScale = laneH * 0.42;
       for (let i = 0; i < channelCount; i++) {
         const midY = laneH * (i + 0.5);
-        drawChannel(gl, vbo, uColor, uPointSize, data.channels[i], 0, w, midY, laneAmpScale, colors);
+        drawChannel(
+          gl,
+          vbo,
+          uColor,
+          uPointSize,
+          data.channels[i],
+          0,
+          w,
+          midY,
+          laneAmpScale,
+          colors,
+        );
       }
 
       if (channelCount === 2) {
@@ -190,17 +196,34 @@ function drawLabelsAndSelection(
         gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.65);
         uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
         gl.uniform4f(uColor, 0.976, 0.451, 0.086, 1.0); // #F97316 橙色
-        uploadAndDraw(gl, vbo, new Float32Array([
-          lx,     0, lx,     h,
-          lx + 1, 0, lx + 1, h,
-          rx - 1, 0, rx - 1, h,
-          rx,     0, rx,     h,
-        ]), gl.LINES);
+        uploadAndDraw(
+          gl,
+          vbo,
+          new Float32Array([
+            lx,
+            0,
+            lx,
+            h,
+            lx + 1,
+            0,
+            lx + 1,
+            h,
+            rx - 1,
+            0,
+            rx - 1,
+            h,
+            rx,
+            0,
+            rx,
+            h,
+          ]),
+          gl.LINES,
+        );
       } else if (lbl.overlapping) {
         // 重叠：红色填充 + 红色边框
-        gl.uniform4f(uColor, 0.95, 0.20, 0.20, 0.25);
+        gl.uniform4f(uColor, 0.95, 0.2, 0.2, 0.25);
         uploadAndDraw(gl, vbo, makeRect(lx, 0, rx, h), gl.TRIANGLES);
-        gl.uniform4f(uColor, 0.85, 0.10, 0.10, 0.90); // 深红
+        gl.uniform4f(uColor, 0.85, 0.1, 0.1, 0.9); // 深红
         uploadAndDraw(gl, vbo, new Float32Array([lx, 0, lx, h, rx, 0, rx, h]), gl.LINES);
       } else {
         gl.uniform4f(uColor, fill[0], fill[1], fill[2], 0.4);
@@ -231,8 +254,10 @@ function drawChannel(
   uColor: WebGLUniformLocation | null,
   uPointSize: WebGLUniformLocation | null,
   ch: ChannelData,
-  xStart: number, xEnd: number,
-  midY: number, ampScale: number,
+  xStart: number,
+  xEnd: number,
+  midY: number,
+  ampScale: number,
   colors: WaveformColors,
 ) {
   const cc = hexToVec4(colors.centerLine ?? "#1F2937");
@@ -260,8 +285,10 @@ function drawEnvelope(
   vbo: WebGLBuffer,
   uColor: WebGLUniformLocation | null,
   peaks: Array<{ min: number; max: number; rms: number }>,
-  xStart: number, xEnd: number,
-  midY: number, ampScale: number,
+  xStart: number,
+  xEnd: number,
+  midY: number,
+  ampScale: number,
   colors: WaveformColors,
 ) {
   const n = peaks.length;
@@ -272,7 +299,7 @@ function drawEnvelope(
   for (let i = 0; i < n; i++) {
     const x = xStart + (i / Math.max(1, n - 1)) * xRange;
     const p = peaks[i];
-    envVerts[i * 4]     = x;
+    envVerts[i * 4] = x;
     envVerts[i * 4 + 1] = midY - p.max * ampScale;
     envVerts[i * 4 + 2] = x;
     envVerts[i * 4 + 3] = midY - p.min * ampScale;
@@ -285,7 +312,7 @@ function drawEnvelope(
   for (let i = 0; i < n; i++) {
     const x = xStart + (i / Math.max(1, n - 1)) * xRange;
     const r = peaks[i].rms;
-    rmsVerts[i * 4]     = x;
+    rmsVerts[i * 4] = x;
     rmsVerts[i * 4 + 1] = midY - r * ampScale;
     rmsVerts[i * 4 + 2] = x;
     rmsVerts[i * 4 + 3] = midY + r * ampScale;
@@ -300,8 +327,10 @@ function drawPolyline(
   vbo: WebGLBuffer,
   uColor: WebGLUniformLocation | null,
   points: Array<[number, number]>,
-  xStart: number, xEnd: number,
-  midY: number, ampScale: number,
+  xStart: number,
+  xEnd: number,
+  midY: number,
+  ampScale: number,
   colors: WaveformColors,
   _isStem: boolean,
 ) {
@@ -310,7 +339,7 @@ function drawPolyline(
 
   const verts = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) {
-    verts[i * 2]     = points[i][0];
+    verts[i * 2] = points[i][0];
     verts[i * 2 + 1] = midY - points[i][1] * ampScale;
   }
 
@@ -318,7 +347,9 @@ function drawPolyline(
   gl.uniform4f(uColor, rc[0], rc[1], rc[2], 0.95);
   uploadAndDraw(gl, vbo, verts, gl.LINE_STRIP);
 
-  void xStart; void xEnd; void _isStem;
+  void xStart;
+  void xEnd;
+  void _isStem;
 }
 
 function drawSamplePoints(
@@ -326,8 +357,10 @@ function drawSamplePoints(
   vbo: WebGLBuffer,
   uColor: WebGLUniformLocation | null,
   points: Array<[number, number]>,
-  xStart: number, xEnd: number,
-  midY: number, ampScale: number,
+  xStart: number,
+  xEnd: number,
+  midY: number,
+  ampScale: number,
   colors: WaveformColors,
 ) {
   const n = points.length;
@@ -335,14 +368,15 @@ function drawSamplePoints(
 
   const verts = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) {
-    verts[i * 2]     = points[i][0];
+    verts[i * 2] = points[i][0];
     verts[i * 2 + 1] = midY - points[i][1] * ampScale;
   }
   const rc = hexToVec4(colors.waveRms);
   gl.uniform4f(uColor, rc[0], rc[1], rc[2], 1.0);
   uploadAndDraw(gl, vbo, verts, gl.POINTS);
 
-  void xStart; void xEnd;
+  void xStart;
+  void xEnd;
 }
 
 // ── WebGL 工具函数 ──────────────────────────────────────────────────────────

@@ -63,10 +63,17 @@
       background var(--duration-fast) var(--ease-out),
       border-color var(--duration-fast) var(--ease-out);
 
-    &:hover { background: var(--color-brand-hover); border-color: var(--color-brand-hover); }
-    &:active { transform: translateY(1px); }
+    &:hover {
+      background: var(--color-brand-hover);
+      border-color: var(--color-brand-hover);
+    }
+    &:active {
+      transform: translateY(1px);
+    }
 
-    input[type="file"] { display: none; }
+    input[type="file"] {
+      display: none;
+    }
   }
 
   &__progress {

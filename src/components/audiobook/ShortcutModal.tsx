@@ -15,7 +15,9 @@ const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] 
   },
 ];
 
-interface ShortcutModalProps { onClose: () => void; }
+interface ShortcutModalProps {
+  onClose: () => void;
+}
 
 export function ShortcutModal({ onClose }: ShortcutModalProps) {
   return (

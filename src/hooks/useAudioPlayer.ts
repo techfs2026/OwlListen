@@ -21,9 +21,7 @@ interface UseAudioPlayerReturn {
 }
 
 function toFetchUrl(urlOrPath: string): string {
-  return /^(blob:|https?:)/.test(urlOrPath)
-    ? urlOrPath
-    : convertFileSrc(urlOrPath);
+  return /^(blob:|https?:)/.test(urlOrPath) ? urlOrPath : convertFileSrc(urlOrPath);
 }
 
 const bufferCache = new Map<string, AudioBuffer>();
@@ -59,7 +57,9 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const stopSource = useCallback(() => {
     if (sourceRef.current) {
       sourceRef.current.onended = null;
-      try { sourceRef.current.stop(); } catch (_) { }
+      try {
+        sourceRef.current.stop();
+      } catch (_) {}
       sourceRef.current.disconnect();
       sourceRef.current = null;
     }
@@ -126,133 +126,148 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     rafRef.current = requestAnimationFrame(tick);
   }, [stopSource, stopRaf]);
 
-  const fetchAndDecode = useCallback(async (urlOrPath: string): Promise<AudioBuffer> => {
-    if (bufferCache.has(urlOrPath)) {
-      return bufferCache.get(urlOrPath)!;
-    }
-    const ctx = getCtx();
-    const url = toFetchUrl(urlOrPath);
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-    bufferCache.set(urlOrPath, audioBuffer);
-    return audioBuffer;
-  }, [getCtx]);
-
-  const prefetch = useCallback(async (urlOrPath: string): Promise<void> => {
-    try {
-      await fetchAndDecode(urlOrPath);
-    } catch (err) {
-      console.warn("[useAudioPlayer] prefetch failed:", urlOrPath, err);
-    }
-  }, [fetchAndDecode]);
-
-  const load = useCallback(async (urlOrPath: string): Promise<void> => {
-    const loadId = ++currentLoadId.current;
-
-    stopSource();
-    stopRaf();
-    isPlayingRef.current = false;
-    bufferRef.current = null;
-    offsetRef.current = 0;
-    setCurrentTime(0);
-    setDuration(0);
-    durationRef.current = 0;
-    setPlayState("loading");
-
-    try {
-      const audioBuffer = await fetchAndDecode(urlOrPath);
-      if (loadId !== currentLoadId.current) return;
-
-      bufferRef.current = audioBuffer;
-      durationRef.current = audioBuffer.duration;
-      setDuration(audioBuffer.duration);
-      setPlayState("ready");
-    } catch (err) {
-      if (loadId !== currentLoadId.current) return;
-      console.error("[useAudioPlayer] load failed:", err);
-      setPlayState("idle");
-    }
-  }, [stopSource, stopRaf, fetchAndDecode]);
-
-  const play = useCallback((fromSec?: number) => {
-    const ctx = getCtx();
-    const buffer = bufferRef.current;
-    if (!buffer) return;
-
-    if (fromSec !== undefined) {
-      offsetRef.current = Math.max(0, Math.min(fromSec, buffer.duration));
-    }
-
-    if (ctx.state === "suspended") {
-      ctx.resume().catch(console.warn);
-    }
-
-    stopSource();
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-
-    source.onended = () => {
-      if (!loopRangeRef.current) {
-        stopRaf();
-        setCurrentTime(buffer.duration);
-        offsetRef.current = 0;
-        isPlayingRef.current = false;
-        setPlayState("ready");
+  const fetchAndDecode = useCallback(
+    async (urlOrPath: string): Promise<AudioBuffer> => {
+      if (bufferCache.has(urlOrPath)) {
+        return bufferCache.get(urlOrPath)!;
       }
-    };
+      const ctx = getCtx();
+      const url = toFetchUrl(urlOrPath);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`fetch failed: ${response.status}`);
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      bufferCache.set(urlOrPath, audioBuffer);
+      return audioBuffer;
+    },
+    [getCtx],
+  );
 
-    source.start(0, offsetRef.current);
-    sourceRef.current = source;
-    startTimeRef.current = ctx.currentTime;
-    isPlayingRef.current = true;
+  const prefetch = useCallback(
+    async (urlOrPath: string): Promise<void> => {
+      try {
+        await fetchAndDecode(urlOrPath);
+      } catch (err) {
+        console.warn("[useAudioPlayer] prefetch failed:", urlOrPath, err);
+      }
+    },
+    [fetchAndDecode],
+  );
 
-    setPlayState("playing");
-    rafRef.current = requestAnimationFrame(tick);
-  }, [getCtx, stopSource, stopRaf, tick]);
+  const load = useCallback(
+    async (urlOrPath: string): Promise<void> => {
+      const loadId = ++currentLoadId.current;
+
+      stopSource();
+      stopRaf();
+      isPlayingRef.current = false;
+      bufferRef.current = null;
+      offsetRef.current = 0;
+      setCurrentTime(0);
+      setDuration(0);
+      durationRef.current = 0;
+      setPlayState("loading");
+
+      try {
+        const audioBuffer = await fetchAndDecode(urlOrPath);
+        if (loadId !== currentLoadId.current) return;
+
+        bufferRef.current = audioBuffer;
+        durationRef.current = audioBuffer.duration;
+        setDuration(audioBuffer.duration);
+        setPlayState("ready");
+      } catch (err) {
+        if (loadId !== currentLoadId.current) return;
+        console.error("[useAudioPlayer] load failed:", err);
+        setPlayState("idle");
+      }
+    },
+    [stopSource, stopRaf, fetchAndDecode],
+  );
+
+  const play = useCallback(
+    (fromSec?: number) => {
+      const ctx = getCtx();
+      const buffer = bufferRef.current;
+      if (!buffer) return;
+
+      if (fromSec !== undefined) {
+        offsetRef.current = Math.max(0, Math.min(fromSec, buffer.duration));
+      }
+
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(console.warn);
+      }
+
+      stopSource();
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+
+      source.onended = () => {
+        if (!loopRangeRef.current) {
+          stopRaf();
+          setCurrentTime(buffer.duration);
+          offsetRef.current = 0;
+          isPlayingRef.current = false;
+          setPlayState("ready");
+        }
+      };
+
+      source.start(0, offsetRef.current);
+      sourceRef.current = source;
+      startTimeRef.current = ctx.currentTime;
+      isPlayingRef.current = true;
+
+      setPlayState("playing");
+      rafRef.current = requestAnimationFrame(tick);
+    },
+    [getCtx, stopSource, stopRaf, tick],
+  );
 
   // 播放一个精确区间 [start, end]，到 end 自动停止，忽略 loopRange
-  const playSegment = useCallback((start: number, end: number) => {
-    const ctx = getCtx();
-    const buffer = bufferRef.current;
-    if (!buffer || end <= start) return;
+  const playSegment = useCallback(
+    (start: number, end: number) => {
+      const ctx = getCtx();
+      const buffer = bufferRef.current;
+      if (!buffer || end <= start) return;
 
-    const clampedStart = Math.max(0, Math.min(start, buffer.duration));
-    const clampedEnd   = Math.max(0, Math.min(end,   buffer.duration));
-    const segDur = clampedEnd - clampedStart;
+      const clampedStart = Math.max(0, Math.min(start, buffer.duration));
+      const clampedEnd = Math.max(0, Math.min(end, buffer.duration));
+      const segDur = clampedEnd - clampedStart;
 
-    if (ctx.state === "suspended") ctx.resume().catch(console.warn);
+      if (ctx.state === "suspended") ctx.resume().catch(console.warn);
 
-    stopSource();
-    stopRaf();
-
-    offsetRef.current = clampedStart;
-    setCurrentTime(clampedStart);
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-
-    source.onended = () => {
+      stopSource();
       stopRaf();
-      setCurrentTime(clampedEnd);
-      offsetRef.current = clampedEnd;
-      isPlayingRef.current = false;
-      setPlayState("ready");
-    };
 
-    // 精确在 segDur 秒后停止
-    source.start(0, clampedStart, segDur);
-    sourceRef.current = source;
-    startTimeRef.current = ctx.currentTime;
-    isPlayingRef.current = true;
+      offsetRef.current = clampedStart;
+      setCurrentTime(clampedStart);
 
-    setPlayState("playing");
-    rafRef.current = requestAnimationFrame(tick);
-  }, [getCtx, stopSource, stopRaf, tick]);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+
+      source.onended = () => {
+        stopRaf();
+        setCurrentTime(clampedEnd);
+        offsetRef.current = clampedEnd;
+        isPlayingRef.current = false;
+        setPlayState("ready");
+      };
+
+      // 精确在 segDur 秒后停止
+      source.start(0, clampedStart, segDur);
+      sourceRef.current = source;
+      startTimeRef.current = ctx.currentTime;
+      isPlayingRef.current = true;
+
+      setPlayState("playing");
+      rafRef.current = requestAnimationFrame(tick);
+    },
+    [getCtx, stopSource, stopRaf, tick],
+  );
 
   const pause = useCallback(() => {
     if (!isPlayingRef.current) return;
@@ -270,18 +285,21 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     setPlayState("paused");
   }, [stopSource, stopRaf]);
 
-  const seek = useCallback((sec: number) => {
-    const buffer = bufferRef.current;
-    if (!buffer) return;
+  const seek = useCallback(
+    (sec: number) => {
+      const buffer = bufferRef.current;
+      if (!buffer) return;
 
-    const clamped = Math.max(0, Math.min(sec, buffer.duration));
-    offsetRef.current = clamped;
-    setCurrentTime(clamped);
+      const clamped = Math.max(0, Math.min(sec, buffer.duration));
+      offsetRef.current = clamped;
+      setCurrentTime(clamped);
 
-    if (isPlayingRef.current) {
-      play(clamped);
-    }
-  }, [play]);
+      if (isPlayingRef.current) {
+        play(clamped);
+      }
+    },
+    [play],
+  );
 
   const toggle = useCallback(() => {
     if (isPlayingRef.current) pause();

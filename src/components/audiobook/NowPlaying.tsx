@@ -19,17 +19,26 @@ function titleToGradient(title: string): string {
     hash = (hash * 31 + title.charCodeAt(i)) >>> 0;
   }
   const palettes = [
-    ["#6366F1", "#8B5CF6"], ["#0EA5E9", "#6366F1"],
-    ["#10B981", "#0EA5E9"], ["#F59E0B", "#EF4444"],
-    ["#EC4899", "#8B5CF6"], ["#14B8A6", "#6366F1"],
-    ["#F97316", "#EC4899"], ["#84CC16", "#10B981"],
+    ["#6366F1", "#8B5CF6"],
+    ["#0EA5E9", "#6366F1"],
+    ["#10B981", "#0EA5E9"],
+    ["#F59E0B", "#EF4444"],
+    ["#EC4899", "#8B5CF6"],
+    ["#14B8A6", "#6366F1"],
+    ["#F97316", "#EC4899"],
+    ["#84CC16", "#10B981"],
   ];
   const [a, b] = palettes[hash % palettes.length];
   return `linear-gradient(135deg, ${a}, ${b})`;
 }
 
 export function NowPlaying({
-  meta, chapter, chapterIndex, totalChapters, playState, cover,
+  meta,
+  chapter,
+  chapterIndex,
+  totalChapters,
+  playState,
+  cover,
 }: NowPlayingProps) {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
@@ -44,9 +53,7 @@ export function NowPlaying({
     setImgError(false);
   }, [coverKey]);
 
-  const coverSrc = cover && !imgError
-    ? `data:${cover.mimeType};base64,${cover.data}`
-    : null;
+  const coverSrc = cover && !imgError ? `data:${cover.mimeType};base64,${cover.data}` : null;
 
   const showCover = coverSrc && imgLoaded;
 
@@ -71,9 +78,7 @@ export function NowPlaying({
           />
         )}
         {!showCover && (
-          <span className="now-playing__cover-initial">
-            {(meta.title || "?")[0].toUpperCase()}
-          </span>
+          <span className="now-playing__cover-initial">{(meta.title || "?")[0].toUpperCase()}</span>
         )}
         {playState === "playing" && (
           <div className="now-playing__playing-badge">

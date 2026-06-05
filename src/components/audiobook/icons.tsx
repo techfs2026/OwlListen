@@ -4,9 +4,21 @@ export function SidebarIcon({ open }: { open: boolean }) {
       <rect x="1" y="2" width="14" height="12" rx="2" stroke="currentColor" strokeWidth="1.2" />
       <line x1="5" y1="2" x2="5" y2="14" stroke="currentColor" strokeWidth="1.2" />
       {open ? (
-        <path d="M8.5 6L6.5 8L8.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d="M8.5 6L6.5 8L8.5 10"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       ) : (
-        <path d="M7.5 6L9.5 8L7.5 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d="M7.5 6L9.5 8L7.5 10"
+          stroke="currentColor"
+          strokeWidth="1.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       )}
     </svg>
   );
@@ -30,7 +42,13 @@ export function SkipIcon({ direction }: { direction: "prev" | "next" }) {
   );
 }
 
-export function PlayingBars({ size = 12, color = "currentColor" }: { size?: number; color?: string }) {
+export function PlayingBars({
+  size = 12,
+  color = "currentColor",
+}: {
+  size?: number;
+  color?: string;
+}) {
   return (
     <svg width={size} height={size} viewBox="0 0 12 12" fill="none">
       <rect x="1" y="2" width="3" height="8" rx="1" fill={color}>
@@ -50,8 +68,20 @@ export function PlayingBarsLarge() {
     <svg width="28" height="16" viewBox="0 0 28 16" fill="white">
       {[0, 8, 16, 24].map((x, i) => (
         <rect key={x} x={x} y="4" width="4" height="8" rx="2">
-          <animate attributeName="height" values="8;14;8" dur="0.9s" repeatCount="indefinite" begin={`${i * 0.15}s`} />
-          <animate attributeName="y" values="4;1;4" dur="0.9s" repeatCount="indefinite" begin={`${i * 0.15}s`} />
+          <animate
+            attributeName="height"
+            values="8;14;8"
+            dur="0.9s"
+            repeatCount="indefinite"
+            begin={`${i * 0.15}s`}
+          />
+          <animate
+            attributeName="y"
+            values="4;1;4"
+            dur="0.9s"
+            repeatCount="indefinite"
+            begin={`${i * 0.15}s`}
+          />
         </rect>
       ))}
     </svg>
@@ -61,7 +91,12 @@ export function PlayingBarsLarge() {
 export function CloseIcon({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 14 14" fill="none">
-      <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M3 3L11 11M11 3L3 11"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

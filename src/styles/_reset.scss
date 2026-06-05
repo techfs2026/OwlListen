@@ -1,6 +1,13 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-html, #root {
+html,
+#root {
   height: 100%;
 }
 
@@ -14,22 +21,42 @@ body {
   overflow: hidden;
 }
 
-button, input, select, textarea { font: inherit; }
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
 
 button {
   font-family: var(--font-sans);
   cursor: pointer;
-  &:disabled { opacity: 0.38; cursor: not-allowed; }
+  &:disabled {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
 }
 
-input, textarea { font-family: var(--font-sans); }
-textarea { resize: none; }
+input,
+textarea {
+  font-family: var(--font-sans);
+}
+textarea {
+  resize: none;
+}
 
 // 全局细滚动条
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
   background: var(--color-border-2);
   border-radius: 2px;
-  &:hover { background: var(--color-ink-3); }
+  &:hover {
+    background: var(--color-ink-3);
+  }
 }

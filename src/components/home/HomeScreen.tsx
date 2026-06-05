@@ -84,7 +84,9 @@ function ModeCard({ badge, title, desc, accentColor, features, onClick }: ModeCa
             </li>
           ))}
         </ul>
-        <div style={{ ...s.cardArrow, color: hovered ? accentColor : "var(--color-border-2)" }}>→</div>
+        <div style={{ ...s.cardArrow, color: hovered ? accentColor : "var(--color-border-2)" }}>
+          →
+        </div>
       </div>
     </div>
   );
@@ -92,31 +94,51 @@ function ModeCard({ badge, title, desc, accentColor, features, onClick }: ModeCa
 
 const s: Record<string, React.CSSProperties> = {
   root: {
-    width: "100vw", height: "100vh",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    background: "var(--color-paper-2)", position: "relative", overflow: "hidden",
+    width: "100vw",
+    height: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "var(--color-paper-2)",
+    position: "relative",
+    overflow: "hidden",
   },
   texture: {
-    position: "absolute", inset: 0,
+    position: "absolute",
+    inset: 0,
     backgroundImage: `
       linear-gradient(var(--color-border) 1px, transparent 1px),
       linear-gradient(90deg, var(--color-border) 1px, transparent 1px)
     `,
     backgroundSize: "40px 40px",
-    opacity: 0.6, pointerEvents: "none",
+    opacity: 0.6,
+    pointerEvents: "none",
   },
   content: {
-    position: "relative", display: "flex", flexDirection: "column",
-    alignItems: "center", gap: 40, animation: "fadeIn 0.4s ease both",
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 40,
+    animation: "fadeIn 0.4s ease both",
   },
   logoWrap: { textAlign: "center" },
   logoEyebrow: {
-    fontFamily: "var(--font-mono)", fontSize: 12, letterSpacing: "0.14em",
-    textTransform: "uppercase" as const, color: "var(--color-ink-3)", marginBottom: 10,
+    fontFamily: "var(--font-mono)",
+    fontSize: 12,
+    letterSpacing: "0.14em",
+    textTransform: "uppercase" as const,
+    color: "var(--color-ink-3)",
+    marginBottom: 10,
   },
   logoTitle: {
-    fontFamily: "var(--font-serif)", fontSize: 46, fontWeight: 400,
-    color: "var(--color-ink-1)", letterSpacing: "-0.5px", lineHeight: 1.15, marginBottom: 10,
+    fontFamily: "var(--font-serif)",
+    fontSize: 46,
+    fontWeight: 400,
+    color: "var(--color-ink-1)",
+    letterSpacing: "-0.5px",
+    lineHeight: 1.15,
+    marginBottom: 10,
   },
   logoSub: { fontSize: 15, color: "var(--color-ink-3)", fontWeight: 300 },
   // 三列网格
@@ -127,8 +149,12 @@ const s: Record<string, React.CSSProperties> = {
     width: 1020,
   },
   card: {
-    background: "var(--color-paper)", border: `1px solid var(--color-border-2)`, borderRadius: 16,
-    cursor: "pointer", position: "relative", overflow: "hidden",
+    background: "var(--color-paper)",
+    border: `1px solid var(--color-border-2)`,
+    borderRadius: 16,
+    cursor: "pointer",
+    position: "relative",
+    overflow: "hidden",
     transition: "border-color 0.2s, box-shadow 0.2s, transform 0.2s",
   },
   stripe: { position: "absolute", left: 0, top: 0, bottom: 0, width: 4 },
@@ -136,11 +162,31 @@ const s: Record<string, React.CSSProperties> = {
   cardTitle: { fontFamily: "var(--font-sans)", fontSize: 18, fontWeight: 500, marginBottom: 10 },
   cardDesc: { fontSize: 13, color: "var(--color-ink-3)", lineHeight: 1.65, marginBottom: 16 },
   featureList: {
-    listStyle: "none", display: "flex", flexDirection: "column" as const,
-    gap: 6, marginBottom: 20,
+    listStyle: "none",
+    display: "flex",
+    flexDirection: "column" as const,
+    gap: 6,
+    marginBottom: 20,
   },
-  featureItem: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--color-ink-2)" },
+  featureItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12,
+    color: "var(--color-ink-2)",
+  },
   featureDot: { width: 5, height: 5, borderRadius: "50%", flexShrink: 0, opacity: 0.7 },
-  cardArrow: { position: "absolute", right: 20, bottom: 18, fontSize: 20, transition: "color 0.2s" },
-  footer: { fontSize: 13, color: "var(--color-ink-3)", fontFamily: "var(--font-mono)", letterSpacing: "0.02em" },
+  cardArrow: {
+    position: "absolute",
+    right: 20,
+    bottom: 18,
+    fontSize: 20,
+    transition: "color 0.2s",
+  },
+  footer: {
+    fontSize: 13,
+    color: "var(--color-ink-3)",
+    fontFamily: "var(--font-mono)",
+    letterSpacing: "0.02em",
+  },
 };

@@ -21,11 +21,11 @@
   border-radius: var(--radius-md);
   white-space: nowrap;
   transition:
-    background   var(--duration-fast) var(--ease-out),
-    color        var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
     border-color var(--duration-fast) var(--ease-out),
-    box-shadow   var(--duration-fast) var(--ease-out),
-    opacity      var(--duration-fast) var(--ease-out);
+    box-shadow var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
 
   &:disabled {
     opacity: 0.45;
@@ -50,8 +50,13 @@
     color: #fff;
     border: 0.5px solid var(--color-brand);
 
-    &:hover:not(:disabled)  { background: var(--color-brand-hover); border-color: var(--color-brand-hover); }
-    &:active:not(:disabled) { transform: translateY(1px); }
+    &:hover:not(:disabled) {
+      background: var(--color-brand-hover);
+      border-color: var(--color-brand-hover);
+    }
+    &:active:not(:disabled) {
+      transform: translateY(1px);
+    }
   }
 
   // ── 变体：深色 ─────────────────────────────────────────────────────────
@@ -60,8 +65,13 @@
     color: #fff;
     border: 0.5px solid var(--color-ink-1);
 
-    &:hover:not(:disabled)  { background: var(--color-ink-2); border-color: var(--color-ink-2); }
-    &:active:not(:disabled) { transform: translateY(1px); }
+    &:hover:not(:disabled) {
+      background: var(--color-ink-2);
+      border-color: var(--color-ink-2);
+    }
+    &:active:not(:disabled) {
+      transform: translateY(1px);
+    }
   }
 
   // ── 变体：描边幽灵 ─────────────────────────────────────────────────────
@@ -99,7 +109,9 @@
     &:hover:not(:disabled) {
       background: color-mix(in srgb, var(--color-success-soft) 70%, var(--color-success) 30%);
     }
-    &:active:not(:disabled) { transform: translateY(1px); }
+    &:active:not(:disabled) {
+      transform: translateY(1px);
+    }
   }
 
   // ── 变体：危险（红色软底）─────────────────────────────────────────────
@@ -111,7 +123,9 @@
     &:hover:not(:disabled) {
       background: color-mix(in srgb, var(--color-danger-soft) 70%, var(--color-danger) 30%);
     }
-    &:active:not(:disabled) { transform: translateY(1px); }
+    &:active:not(:disabled) {
+      transform: translateY(1px);
+    }
   }
 
   // ── 变体：图标按钮（方形）──────────────────────────────────────────────

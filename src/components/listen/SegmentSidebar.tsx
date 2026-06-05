@@ -11,7 +11,7 @@ interface SegmentSidebarProps {
 
 const STATUS_LABEL: Record<SegmentStatus, string> = {
   pending: "待练",
-  done:    "已完成",
+  done: "已完成",
   flagged: "重听",
 };
 
@@ -21,7 +21,12 @@ function fmtTime(sec: number): string {
   return `${m}:${s < 10 ? "0" : ""}${s}`;
 }
 
-export function SegmentSidebar({ segments, segStates, currentIndex, onSelect }: SegmentSidebarProps) {
+export function SegmentSidebar({
+  segments,
+  segStates,
+  currentIndex,
+  onSelect,
+}: SegmentSidebarProps) {
   const counts = { pending: 0, done: 0, flagged: 0 };
   for (const st of segStates.values()) counts[st.status]++;
 
@@ -40,7 +45,10 @@ export function SegmentSidebar({ segments, segStates, currentIndex, onSelect }: 
 
       <div className="seg-sidebar__list">
         {segments.map((seg) => {
-          const state = segStates.get(seg.index) ?? { status: "pending" as SegmentStatus, userText: "" };
+          const state = segStates.get(seg.index) ?? {
+            status: "pending" as SegmentStatus,
+            userText: "",
+          };
           const isActive = seg.index === currentIndex;
 
           return (
@@ -54,9 +62,7 @@ export function SegmentSidebar({ segments, segStates, currentIndex, onSelect }: 
               onClick={() => onSelect(seg.index)}
             >
               <div className="seg-item__top">
-                <span className="seg-item__num">
-                  #{String(seg.index + 1).padStart(2, "0")}
-                </span>
+                <span className="seg-item__num">#{String(seg.index + 1).padStart(2, "0")}</span>
                 <span
                   className={`seg-item__dot seg-item__dot--${state.status}`}
                   title={STATUS_LABEL[state.status]}
@@ -65,9 +71,7 @@ export function SegmentSidebar({ segments, segStates, currentIndex, onSelect }: 
               <div className="seg-item__time">
                 {fmtTime(seg.start)} → {fmtTime(seg.end)}
               </div>
-              {seg.label && (
-                <div className="seg-item__label">{seg.label}</div>
-              )}
+              {seg.label && <div className="seg-item__label">{seg.label}</div>}
             </div>
           );
         })}

@@ -15,13 +15,16 @@ export function DiffView({ result }: DiffViewProps) {
         <div className="diff-view__head-left">
           <span className="diff-view__head-label">原文对照</span>
           <span className="diff-view__legend">
-            <span className="diff-view__dot diff-view__dot--ok" />正确
+            <span className="diff-view__dot diff-view__dot--ok" />
+            正确
           </span>
           <span className="diff-view__legend">
-            <span className="diff-view__dot diff-view__dot--wrong" />多余
+            <span className="diff-view__dot diff-view__dot--wrong" />
+            多余
           </span>
           <span className="diff-view__legend">
-            <span className="diff-view__dot diff-view__dot--missing" />缺失
+            <span className="diff-view__dot diff-view__dot--missing" />
+            缺失
           </span>
         </div>
         <div className="diff-view__score-row">
@@ -44,18 +47,30 @@ export function DiffView({ result }: DiffViewProps) {
         ) : (
           ops.map((op, i) => {
             if (op.type === "ok") {
-              return <span key={i} className="diff-view__word diff-view__word--ok">{op.word} </span>;
+              return (
+                <span key={i} className="diff-view__word diff-view__word--ok">
+                  {op.word}{" "}
+                </span>
+              );
             }
             if (op.type === "del") {
               return (
-                <span key={i} className="diff-view__word diff-view__word--wrong" title="你多写了这个词">
+                <span
+                  key={i}
+                  className="diff-view__word diff-view__word--wrong"
+                  title="你多写了这个词"
+                >
                   {op.word}{" "}
                 </span>
               );
             }
             // ins = missing
             return (
-              <span key={i} className="diff-view__word diff-view__word--missing" title="原文有但你漏掉了">
+              <span
+                key={i}
+                className="diff-view__word diff-view__word--missing"
+                title="原文有但你漏掉了"
+              >
                 [{op.word}]{" "}
               </span>
             );

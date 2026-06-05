@@ -1,10 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  AudioInfo,
-  Label,
-  LabelData,
-  RenderData,
-} from "@/types/waveform";
+import type { AudioInfo, Label, LabelData, RenderData } from "@/types/waveform";
 
 /** 加载音频文件,返回元信息 */
 export async function loadAudio(path: string): Promise<AudioInfo> {
@@ -18,7 +13,7 @@ export async function loadAudio(path: string): Promise<AudioInfo> {
 export async function getPeaks(
   startSec: number,
   endSec: number,
-  pixelWidth: number
+  pixelWidth: number,
 ): Promise<RenderData> {
   return await invoke<RenderData>("get_peaks", {
     view: { startSec, endSec, pixelWidth },
@@ -69,7 +64,7 @@ export interface TranscribeProgressEvent {
 export async function splitAudio(
   audioPath: string,
   labels: LabelData[],
-  outputDir: string
+  outputDir: string,
 ): Promise<string[]> {
   return await invoke<string[]>("split_audio", {
     audioPath,
@@ -84,7 +79,7 @@ export async function splitAudio(
  */
 export async function transcribeSegments(
   segmentPaths: string[],
-  model: string = "small"
+  model: string = "small",
 ): Promise<string[]> {
   return await invoke<string[]>("transcribe_segments", {
     segmentPaths,
@@ -99,7 +94,7 @@ export async function buildZip(
   segmentPaths: string[],
   labels: LabelData[],
   transcriptions: string[],
-  outputPath: string
+  outputPath: string,
 ): Promise<void> {
   await invoke("build_zip", {
     segmentPaths,

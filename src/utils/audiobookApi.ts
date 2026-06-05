@@ -28,8 +28,8 @@ export interface RecentBook {
 }
 
 export interface AudiobookCover {
-  data: string;      // base64
-  mimeType: string;  // "image/jpeg" | "image/png"
+  data: string; // base64
+  mimeType: string; // "image/jpeg" | "image/png"
 }
 
 export async function loadAudiobook(path: string): Promise<AudiobookMeta> {
@@ -92,10 +92,7 @@ export async function playbackClose(): Promise<void> {
   return invoke("playback_close");
 }
 
-export async function playbackSeek(
-  chapterIndex: number,
-  positionSec: number,
-): Promise<void> {
+export async function playbackSeek(chapterIndex: number, positionSec: number): Promise<void> {
   return invoke("playback_seek", { chapterIndex, positionSec });
 }
 

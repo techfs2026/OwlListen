@@ -23,7 +23,9 @@ const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] 
   },
 ];
 
-interface ShortcutModalProps { onClose: () => void; }
+interface ShortcutModalProps {
+  onClose: () => void;
+}
 
 export function ShortcutModal({ onClose }: ShortcutModalProps) {
   return (
@@ -33,23 +35,42 @@ export function ShortcutModal({ onClose }: ShortcutModalProps) {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 32px" }}>
           {SHORTCUT_GROUPS.map((group) => (
-            <div key={group.group} style={{ display: "flex", flexDirection: "column", gap: 0, marginBottom: 16 }}>
-              <div style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: "var(--font-size-xs)",
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: "var(--color-ink-3)",
-                marginBottom: 6,
-                borderBottom: "0.5px solid var(--color-border)",
-                paddingBottom: "var(--space-1)",
-              }}>
+            <div
+              key={group.group}
+              style={{ display: "flex", flexDirection: "column", gap: 0, marginBottom: 16 }}
+            >
+              <div
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "var(--font-size-xs)",
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "var(--color-ink-3)",
+                  marginBottom: 6,
+                  borderBottom: "0.5px solid var(--color-border)",
+                  paddingBottom: "var(--space-1)",
+                }}
+              >
                 {group.group}
               </div>
               {group.items.map(({ key, label }) => (
-                <div key={key} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "5px 0" }}>
+                <div
+                  key={key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--space-3)",
+                    padding: "5px 0",
+                  }}
+                >
                   <kbd className="kbd">{key}</kbd>
-                  <span style={{ fontSize: "var(--font-size-base)", color: "var(--color-ink-1)", fontFamily: "var(--font-sans)" }}>
+                  <span
+                    style={{
+                      fontSize: "var(--font-size-base)",
+                      color: "var(--color-ink-1)",
+                      fontFamily: "var(--font-sans)",
+                    }}
+                  >
                     {label}
                   </span>
                 </div>

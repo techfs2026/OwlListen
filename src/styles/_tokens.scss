@@ -4,62 +4,62 @@
 // ──────────────────────────────────────────────────────────────────────────
 
 // Google Fonts
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap");
 
 :root {
   // ── 颜色：纸张层（米色）────────────────────────────────────────────
-  --color-paper:        #FAFAF7;   // = C.paper
-  --color-paper-2:      #F4F3EE;   // = C.paper2
-  --color-paper-3:      #EEECEA;   // = C.paper3
+  --color-paper: #fafaf7; // = C.paper
+  --color-paper-2: #f4f3ee; // = C.paper2
+  --color-paper-3: #eeecea; // = C.paper3
 
   // ── 颜色：墨水层 ──────────────────────────────────────────────────
-  --color-ink-1:        #1A2744;   // = C.ink
-  --color-ink-2:        #3D4F6E;   // = C.ink2
-  --color-ink-3:        #8492AA;   // = C.ink3
+  --color-ink-1: #1a2744; // = C.ink
+  --color-ink-2: #3d4f6e; // = C.ink2
+  --color-ink-3: #8492aa; // = C.ink3
 
   // ── 颜色：边框 ────────────────────────────────────────────────────
-  --color-border:       rgba(26, 39, 68, 0.09);   // = C.border
-  --color-border-2:     rgba(26, 39, 68, 0.16);   // = C.border2
+  --color-border: rgba(26, 39, 68, 0.09); // = C.border
+  --color-border-2: rgba(26, 39, 68, 0.16); // = C.border2
 
   // ── 颜色：主题色（蓝）─────────────────────────────────────────────
-  --color-brand:        #1A4ED8;   // = C.blue
-  --color-brand-hover:  #1640B8;   // 比 brand 稍深一档（styles.ts 没定义，按惯例 -10%）
-  --color-brand-soft:   #E8EEFA;   // = C.blueLt
-  --color-brand-mid:    #5B7FEA;   // = C.blueMid
+  --color-brand: #1a4ed8; // = C.blue
+  --color-brand-hover: #1640b8; // 比 brand 稍深一档（styles.ts 没定义，按惯例 -10%）
+  --color-brand-soft: #e8eefa; // = C.blueLt
+  --color-brand-mid: #5b7fea; // = C.blueMid
 
   // ── 颜色：有声书强调色（橙）—— 与首页有声书卡片主色一致 ──────────────
-  --color-audiobook:      #F97316;
-  --color-audiobook-soft: #FEEEE0;
+  --color-audiobook: #f97316;
+  --color-audiobook-soft: #feeee0;
 
   // ── 颜色：状态色 ──────────────────────────────────────────────────
-  --color-danger:       #C0392B;   // = C.red
-  --color-danger-soft:  #FBEAEA;   // = C.redLt
-  --color-success:      #166534;   // = C.green
-  --color-success-soft: #DCFCE7;   // = C.greenLt
-  --color-warning:      #92400E;   // = C.amber
-  --color-warning-soft: #FEF3C7;   // = C.amberLt
+  --color-danger: #c0392b; // = C.red
+  --color-danger-soft: #fbeaea; // = C.redLt
+  --color-success: #166534; // = C.green
+  --color-success-soft: #dcfce7; // = C.greenLt
+  --color-warning: #92400e; // = C.amber
+  --color-warning-soft: #fef3c7; // = C.amberLt
 
   // ── 颜色：交互层（半透明叠加，配合米色底略调暖）──────────────────
-  --color-hover-overlay:  rgba(26, 39, 68, 0.045);
+  --color-hover-overlay: rgba(26, 39, 68, 0.045);
   --color-active-overlay: rgba(26, 39, 68, 0.085);
 
   // ── 字体族 ────────────────────────────────────────────────────────
-  --font-sans:  'DM Sans', system-ui, sans-serif;
-  --font-serif: 'DM Serif Display', Georgia, serif;
-  --font-mono:  'DM Mono', 'Fira Code', monospace;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-serif: "DM Serif Display", Georgia, serif;
+  --font-mono: "DM Mono", "Fira Code", monospace;
 
   // ── 字号 ──────────────────────────────────────────────────────────
-  --font-size-xs:    10px;
-  --font-size-sm:    11px;
-  --font-size-base:  13px;
-  --font-size-md:    14px;
-  --font-size-lg:    16px;
-  --font-size-xl:    20px;
-  --font-size-2xl:   24px;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+  --font-size-2xl: 24px;
 
   // ── 行高 ──────────────────────────────────────────────────────────
   --line-height-tight: 1.25;
-  --line-height-base:  1.4;
+  --line-height-base: 1.4;
   --line-height-relax: 1.6;
 
   // ── 间距（4 的倍数）───────────────────────────────────────────────
@@ -73,33 +73,55 @@
   --space-7: 48px;
 
   // ── 圆角 ──────────────────────────────────────────────────────────
-  --radius-sm:   4px;
-  --radius-md:   6px;
-  --radius-lg:   10px;
-  --radius-xl:   16px;
-  --radius-2xl:  20px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
   --radius-full: 9999px;
 
   // ── 阴影 ──────────────────────────────────────────────────────────
-  --shadow-sm:  0 1px 2px rgba(26, 39, 68, 0.07);                                  // = SHADOW.sm
-  --shadow-md:  0 1px 3px rgba(26, 39, 68, 0.07), 0 6px 20px rgba(26, 39, 68, 0.06); // = SHADOW.md
-  --shadow-lg:  0 4px 24px rgba(26, 39, 68, 0.10);                                 // = SHADOW.lg
-  --shadow-xl:  0 16px 48px rgba(26, 39, 68, 0.18);                                // 模态/封面用，比 lg 再重一档
+  --shadow-sm: 0 1px 2px rgba(26, 39, 68, 0.07); // = SHADOW.sm
+  --shadow-md: 0 1px 3px rgba(26, 39, 68, 0.07), 0 6px 20px rgba(26, 39, 68, 0.06); // = SHADOW.md
+  --shadow-lg: 0 4px 24px rgba(26, 39, 68, 0.1); // = SHADOW.lg
+  --shadow-xl: 0 16px 48px rgba(26, 39, 68, 0.18); // 模态/封面用，比 lg 再重一档
 
   // ── 动效 ──────────────────────────────────────────────────────────
   --duration-fast: 0.12s;
   --duration-base: 0.18s;
   --duration-slow: 0.28s;
-  --ease-out:      cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 
   // ── 层级 ──────────────────────────────────────────────────────────
-  --z-toolbar:  10;
+  --z-toolbar: 10;
   --z-dropdown: 100;
-  --z-modal:    1000;
+  --z-modal: 1000;
 }
 
 // ── 关键帧 ─────────────────────────────────────────────────────────────
-@keyframes spin     { to { transform: rotate(360deg); } }
-@keyframes fadeIn   { from { opacity: 0; transform: translateY(6px); }   to { opacity: 1; transform: none; } }
-@keyframes slideIn  { from { opacity: 0; transform: translateX(-8px); }  to { opacity: 1; transform: none; } }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

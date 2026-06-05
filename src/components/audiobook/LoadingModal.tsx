@@ -8,10 +8,7 @@ interface LoadingModalProps {
   subtitle?: string;
 }
 
-export function LoadingModal({
-  title = "加载中",
-  subtitle,
-}: LoadingModalProps) {
+export function LoadingModal({ title = "加载中", subtitle }: LoadingModalProps) {
   return (
     <div className="modal-overlay loading-modal__overlay">
       <div className="loading-modal">

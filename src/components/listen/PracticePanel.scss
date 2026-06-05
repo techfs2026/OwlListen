@@ -75,7 +75,7 @@
   &__section-label {
     font-family: var(--font-mono);
     font-size: var(--font-size-sm);
-    letter-spacing: 0.10em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--color-ink-3);
     display: flex;
@@ -266,6 +266,11 @@
 
 // ── pulse 动画（语音录音指示点）──────────────────────────────────────────
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.4; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
 }

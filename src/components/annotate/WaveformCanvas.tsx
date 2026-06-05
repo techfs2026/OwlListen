@@ -64,7 +64,7 @@ export function WaveformCanvas({
       const ratio = (x - rect.left) / rect.width;
       return viewRange.startSec + ratio * (viewRange.endSec - viewRange.startSec);
     },
-    [canvasRef, viewRange]
+    [canvasRef, viewRange],
   );
 
   const secToRatio = useCallback(
@@ -73,7 +73,7 @@ export function WaveformCanvas({
       if (dur <= 0) return 0;
       return (sec - viewRange.startSec) / dur;
     },
-    [viewRange]
+    [viewRange],
   );
 
   const secToPx = useCallback(
@@ -83,7 +83,7 @@ export function WaveformCanvas({
       const rect = canvas.getBoundingClientRect();
       return rect.left + secToRatio(sec) * rect.width;
     },
-    [canvasRef, secToRatio]
+    [canvasRef, secToRatio],
   );
 
   // ── 边缘 hit-test ──────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ export function WaveformCanvas({
       }
       return null;
     },
-    [labels, secToPx]
+    [labels, secToPx],
   );
 
   // ── 鼠标事件 ──────────────────────────────────────────────────────────────
@@ -121,7 +121,7 @@ export function WaveformCanvas({
       const sec = xToSec(e.clientX);
       modeRef.current = { kind: "maybe-seek", startX: e.clientX, startSec: sec };
     },
-    [xToSec, hitTestEdge]
+    [xToSec, hitTestEdge],
   );
 
   const handleMouseMove = useCallback(
@@ -160,7 +160,7 @@ export function WaveformCanvas({
       const hit = hitTestEdge(e.clientX);
       setCursor(hit ? "col-resize" : "crosshair");
     },
-    [xToSec, secToRatio, hitTestEdge, onLabelEdgeDrag]
+    [xToSec, secToRatio, hitTestEdge, onLabelEdgeDrag],
   );
 
   const handleMouseUp = useCallback(
@@ -191,7 +191,7 @@ export function WaveformCanvas({
         return;
       }
     },
-    [xToSec, onRegionSelected, onSeek]
+    [xToSec, onRegionSelected, onSeek],
   );
 
   const handleMouseLeave = useCallback(() => {
@@ -217,7 +217,7 @@ export function WaveformCanvas({
         onScroll((e.deltaY / 200) * dur);
       }
     },
-    [xToSec, viewRange, onZoom, onScroll]
+    [xToSec, viewRange, onZoom, onScroll],
   );
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
@@ -243,7 +243,18 @@ export function WaveformCanvas({
       colors,
       loopRange: normalizedLoop,
     });
-  }, [data, playhead, duration, labels, selectedId, dragDisplay, colors, loopRange, render, secToRatio]);
+  }, [
+    data,
+    playhead,
+    duration,
+    labels,
+    selectedId,
+    dragDisplay,
+    colors,
+    loopRange,
+    render,
+    secToRatio,
+  ]);
 
   return (
     <canvas

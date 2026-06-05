@@ -26,7 +26,10 @@ export function ListenScreen({ onBack }: ListenScreenProps) {
   const { meta, segStates, currentIndex } = pack;
   const segments = meta?.segments ?? [];
   const currentSeg = getCurrentSeg();
-  const currentState = segStates.get(currentIndex) ?? { status: "pending" as SegmentStatus, userText: "" };
+  const currentState = segStates.get(currentIndex) ?? {
+    status: "pending" as SegmentStatus,
+    userText: "",
+  };
 
   const handleFileInput = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,7 +37,7 @@ export function ListenScreen({ onBack }: ListenScreenProps) {
       if (file) await loadZip(file);
       e.target.value = "";
     },
-    [loadZip]
+    [loadZip],
   );
 
   const handleDrop = useCallback(
@@ -45,21 +48,22 @@ export function ListenScreen({ onBack }: ListenScreenProps) {
         await loadZip(file);
       }
     },
-    [loadZip]
+    [loadZip],
   );
 
   const total = segments.length;
   const doneCount = [...segStates.values()].filter((s) => s.status === "done").length;
 
   return (
-    <div
-      className="listen"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={handleDrop}
-    >
+    <div className="listen" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
       {/* 顶栏 */}
       <div className="listen__toolbar">
-        <Btn variant="ghost" size="sm" onClick={onBack} style={{ fontSize: 12, padding: "4px 10px" }}>
+        <Btn
+          variant="ghost"
+          size="sm"
+          onClick={onBack}
+          style={{ fontSize: 12, padding: "4px 10px" }}
+        >
           ← 返回
         </Btn>
         <TbSep />
@@ -116,7 +120,11 @@ export function ListenScreen({ onBack }: ListenScreenProps) {
 
 // ── 空状态（未导入 ZIP） ──────────────────────────────────────────────────────
 
-function EmptyState({ onFileInput }: { onFileInput: (e: React.ChangeEvent<HTMLInputElement>) => void }) {
+function EmptyState({
+  onFileInput,
+}: {
+  onFileInput: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
   return (
     <div className="listen__empty">
       <div className="listen__empty-texture" />
@@ -152,7 +160,9 @@ function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) 
     <div className="listen__error">
       <p className="listen__error-title">导入失败</p>
       <p className="listen__error-msg">{error}</p>
-      <Btn variant="ghost" size="sm" onClick={onRetry}>重试</Btn>
+      <Btn variant="ghost" size="sm" onClick={onRetry}>
+        重试
+      </Btn>
     </div>
   );
 }

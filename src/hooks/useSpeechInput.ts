@@ -4,10 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 // ── 类型 ───────────────────────────────────────────────────────────────────────
 
 export type SpeechState =
-  | "idle"          // 空闲，可以开始录音
-  | "listening"     // 录音中
-  | "transcribing"  // 录音结束，正在调 Whisper 转写
-  | "unsupported";  // 浏览器不支持 MediaRecorder（理论上 Tauri 都支持）
+  | "idle" // 空闲，可以开始录音
+  | "listening" // 录音中
+  | "transcribing" // 录音结束，正在调 Whisper 转写
+  | "unsupported"; // 浏览器不支持 MediaRecorder（理论上 Tauri 都支持）
 
 export interface UseSpeechInputOptions {
   /** Whisper 模型，默认 "small"（约 465MB，质量优先，全应用统一） */
@@ -32,11 +32,11 @@ function pickMimeType(): { mimeType: string; extension: string } | null {
 
   const candidates: { mimeType: string; extension: string }[] = [
     { mimeType: "audio/webm;codecs=opus", extension: "webm" },
-    { mimeType: "audio/webm",             extension: "webm" },
+    { mimeType: "audio/webm", extension: "webm" },
     { mimeType: "audio/mp4;codecs=mp4a.40.2", extension: "mp4" },
-    { mimeType: "audio/mp4",              extension: "mp4" },
-    { mimeType: "audio/ogg;codecs=opus",  extension: "ogg" },
-    { mimeType: "audio/aac",              extension: "aac" },
+    { mimeType: "audio/mp4", extension: "mp4" },
+    { mimeType: "audio/ogg;codecs=opus", extension: "ogg" },
+    { mimeType: "audio/aac", extension: "aac" },
   ];
 
   for (const c of candidates) {
@@ -79,7 +79,9 @@ export function useSpeechInput(
 
   // 用 ref 包住回调，避免 closure 过时
   const onTranscriptRef = useRef(onTranscript);
-  useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
+  useEffect(() => {
+    onTranscriptRef.current = onTranscript;
+  }, [onTranscript]);
 
   // 释放音频流（关掉麦克风指示灯）
   const releaseStream = useCallback(() => {
@@ -200,14 +202,17 @@ export function useSpeechInput(
   }, [speechState, startListening, stopListening]);
 
   // 卸载时清理资源
-  useEffect(() => () => {
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
-    }
-    recorderRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-  }, []);
+  useEffect(
+    () => () => {
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        recorderRef.current.stop();
+      }
+      recorderRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    },
+    [],
+  );
 
   return { speechState, toggleListening, stopListening };
 }

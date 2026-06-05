@@ -22,20 +22,31 @@ const FIT_PX_PER_SEC = 50;
 
 export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   const {
-    audioInfo, loadingState, viewRange,
-    loadFile: loadWaveform, fetchPeaks, setViewRange,
-    zoomIn, zoomOut, scrollBy,
+    audioInfo,
+    loadingState,
+    viewRange,
+    loadFile: loadWaveform,
+    fetchPeaks,
+    setViewRange,
+    zoomIn,
+    zoomOut,
+    scrollBy,
   } = useWaveform();
 
-  const {
-    labels, addLabel, removeLabel, updateLabel,
-    clearLabels, saveToFile, loadFromFile,
-  } = useLabels();
+  const { labels, addLabel, removeLabel, updateLabel, clearLabels, saveToFile, loadFromFile } =
+    useLabels();
 
   const {
-    playState, currentTime,
+    playState,
+    currentTime,
     loopRange,
-    load: loadAudio, play, playSegment, pause, seek, unload: unloadAudio, setLoop,
+    load: loadAudio,
+    play,
+    playSegment,
+    pause,
+    seek,
+    unload: unloadAudio,
+    setLoop,
   } = useAudioPlayer();
 
   const [renderData, setRenderData] = useState<RenderData | null>(null);
@@ -50,7 +61,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   // 按起点排序的片段，供 ←/→ 片段间导航使用
   const sortedLabels = useMemo<Label[]>(
     () => [...labels].sort((a, b) => a.start - b.start),
-    [labels]
+    [labels],
   );
 
   // 重叠检测：O(n²)，label 数量通常 < 200 完全可接受
@@ -58,7 +69,8 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     const ids = new Set<string>();
     for (let i = 0; i < labels.length; i++) {
       for (let j = i + 1; j < labels.length; j++) {
-        const a = labels[i], b = labels[j];
+        const a = labels[i],
+          b = labels[j];
         if (a.start < b.end && a.end > b.start) {
           ids.add(a.id);
           ids.add(b.id);
@@ -91,13 +103,16 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         if (process.env.NODE_ENV !== "production") {
           const ch0 = data.channels[0];
           const len =
-            ch0?.kind === "envelope" ? ch0.peaks.length :
-            ch0?.kind === "polyline" || ch0?.kind === "stem" ? ch0.points.length : 0;
+            ch0?.kind === "envelope"
+              ? ch0.peaks.length
+              : ch0?.kind === "polyline" || ch0?.kind === "stem"
+                ? ch0.points.length
+                : 0;
           const dur = viewRange.endSec - viewRange.startSec;
           const spp = (dur * (audioInfo?.sampleRate ?? 22050)) / pixelWidth;
           console.log(
             `[waveform] mode=${data.mode} channels=${data.channels.length} ` +
-            `len=${len} pixelWidth=${pixelWidth} spp=${spp.toFixed(2)} dur=${dur.toFixed(3)}s`
+              `len=${len} pixelWidth=${pixelWidth} spp=${spp.toFixed(2)} dur=${dur.toFixed(3)}s`,
           );
         }
         setRenderData(data);
@@ -114,7 +129,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     };
   }, []);
 
-  useEffect(() => { refreshPeaks(); }, [refreshPeaks]);
+  useEffect(() => {
+    refreshPeaks();
+  }, [refreshPeaks]);
 
   useEffect(() => {
     const ro = new ResizeObserver(() => {
@@ -194,7 +211,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       seek(start);
       play(start);
     },
-    [addLabel, setLoop, seek, play]
+    [addLabel, setLoop, seek, play],
   );
 
   const handleZoom = useCallback(
@@ -202,7 +219,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       if (delta > 0) zoomIn(centerSec);
       else zoomOut(centerSec);
     },
-    [zoomIn, zoomOut]
+    [zoomIn, zoomOut],
   );
 
   const handleJumpTo = useCallback(
@@ -211,7 +228,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       setViewRange({ startSec: Math.max(0, start - pad), endSec: end + pad });
       seek(start);
     },
-    [setViewRange, seek]
+    [setViewRange, seek],
   );
 
   // 选中片段并播放（回环则换 loop 区间，否则播一段自动停）。
@@ -235,7 +252,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         playSegment(label.start, label.end);
       }
     },
-    [viewRange, loopRange, setLoop, seek, play, playSegment, setViewRange]
+    [viewRange, loopRange, setLoop, seek, play, playSegment, setViewRange],
   );
 
   // ←/→ 片段间导航：有选中按序号 ±1；无选中则跳到 playhead 之后/之前最近的一段。
@@ -252,12 +269,15 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         target = sortedLabels.find((l) => l.start > currentTime + 0.01);
       } else {
         for (let i = sortedLabels.length - 1; i >= 0; i--) {
-          if (sortedLabels[i].start < currentTime - 0.01) { target = sortedLabels[i]; break; }
+          if (sortedLabels[i].start < currentTime - 0.01) {
+            target = sortedLabels[i];
+            break;
+          }
         }
       }
       if (target) selectLabel(target, true);
     },
-    [sortedLabels, selectedId, currentTime, selectLabel]
+    [sortedLabels, selectedId, currentTime, selectLabel],
   );
 
   // 边缘拖拽
@@ -277,7 +297,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         if (isLooping) setLoop([label.start, newEnd]);
       }
     },
-    [labels, updateLabel, audioInfo, loopRange, selectedId, setLoop]
+    [labels, updateLabel, audioInfo, loopRange, selectedId, setLoop],
   );
 
   const handleDrop = useCallback(
@@ -293,7 +313,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       setLoop(null);
       await Promise.all([loadWaveform(path, computeFitView), loadAudio(path)]);
     },
-    [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop, computeFitView]
+    [loadWaveform, loadAudio, clearLabels, unloadAudio, setLoop, computeFitView],
   );
 
   // ── 导出 ──────────────────────────────────────────────────────────────────
@@ -323,7 +343,11 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         setExportProgress({ step: "transcribing", transcribed: i + 1, total: segmentPaths.length });
       }
 
-      setExportProgress({ step: "zipping", transcribed: transcriptions.length, total: transcriptions.length });
+      setExportProgress({
+        step: "zipping",
+        transcribed: transcriptions.length,
+        total: transcriptions.length,
+      });
       await buildZip(segmentPaths, labelData, transcriptions, zipPath);
 
       setExportProgress({
@@ -352,9 +376,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
       const el = document.activeElement as HTMLElement | null;
       const inEditable =
-        el?.tagName === "INPUT" ||
-        el?.tagName === "TEXTAREA" ||
-        el?.isContentEditable === true;
+        el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable === true;
       if (inEditable) return;
 
       // H：显示 / 隐藏快捷键帮助
@@ -392,10 +414,16 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
         const target =
           labels.find((lb) => currentTime >= lb.start && currentTime <= lb.end) ??
-          labels.reduce<typeof labels[0] | null>((best, lb) => {
+          labels.reduce<(typeof labels)[0] | null>((best, lb) => {
             if (!best) return lb;
-            const distA = Math.min(Math.abs(currentTime - best.start), Math.abs(currentTime - best.end));
-            const distB = Math.min(Math.abs(currentTime - lb.start), Math.abs(currentTime - lb.end));
+            const distA = Math.min(
+              Math.abs(currentTime - best.start),
+              Math.abs(currentTime - best.end),
+            );
+            const distB = Math.min(
+              Math.abs(currentTime - lb.start),
+              Math.abs(currentTime - lb.end),
+            );
             return distB < distA ? lb : best;
           }, null);
 
@@ -418,17 +446,20 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [
-    playState, play, pause, loadingState, navigateSegment,
-    currentTime, labels,
-    loopRange, setLoop, seek,
+    playState,
+    play,
+    pause,
+    loadingState,
+    navigateSegment,
+    currentTime,
+    labels,
+    loopRange,
+    setLoop,
+    seek,
   ]);
 
   return (
-    <div
-      style={s.root}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={handleDrop}
-    >
+    <div style={s.root} onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
       <AnnotateToolbar
         audioInfo={audioInfo}
         loadingState={loadingState}
@@ -441,7 +472,10 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         onOpenAudio={handleOpenAudio}
         onSaveLabels={handleSaveLabels}
         onLoadLabels={handleLoadLabels}
-        onClearLabels={() => { setLoop(null); clearLabels(); }}
+        onClearLabels={() => {
+          setLoop(null);
+          clearLabels();
+        }}
         onPlay={() => play()}
         onPause={pause}
         onExport={handleExport}
@@ -449,9 +483,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
           if (loopRange) setLoop(null);
           else {
             // 找当前时间所在 label
-            const target = labels.find(
-              (lb) => currentTime >= lb.start && currentTime <= lb.end
-            ) ?? labels[labels.length - 1];
+            const target =
+              labels.find((lb) => currentTime >= lb.start && currentTime <= lb.end) ??
+              labels[labels.length - 1];
             if (target) {
               setLoop([target.start, target.end]);
               seek(target.start);
@@ -470,9 +504,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
             hint="支持 MP3 · WAV · FLAC · M4A · OGG · AAC"
           />
         )}
-        {loadingState === "decoding" && (
-          <EmptyState spinner title="解码中，请稍候…" />
-        )}
+        {loadingState === "decoding" && <EmptyState spinner title="解码中，请稍候…" />}
         {(loadingState === "ready" || renderData !== null) && (
           <WaveformCanvas
             data={renderData}
@@ -494,9 +526,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       </div>
 
       {/* 时间轴 */}
-      {loadingState === "ready" && (
-        <TimeAxis viewRange={viewRange} width={containerWidth} />
-      )}
+      {loadingState === "ready" && <TimeAxis viewRange={viewRange} width={containerWidth} />}
 
       {/* 标注列表 */}
       <LabelList
@@ -529,7 +559,7 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
           onClose={() => setExportProgress(null)}
           onReveal={(path) => {
             import("@tauri-apps/api/core").then(({ invoke }) =>
-              invoke("reveal_in_finder", { path }).catch(console.warn)
+              invoke("reveal_in_finder", { path }).catch(console.warn),
             );
           }}
         />
@@ -544,26 +574,47 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 // ── In 点指示器 ───────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
 
-function EmptyState({ icon, title, hint, spinner }: {
-  icon?: string; title: string; hint?: string; spinner?: boolean;
+function EmptyState({
+  icon,
+  title,
+  hint,
+  spinner,
+}: {
+  icon?: string;
+  title: string;
+  hint?: string;
+  spinner?: boolean;
 }) {
   return (
-    <div style={{
-      position: "absolute", inset: 0,
-      display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", gap: 8,
-    }}>
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+      }}
+    >
       {spinner ? (
-        <div style={{
-          width: 22, height: 22,
-          border: `2px solid var(--color-border)`,
-          borderTop: `2px solid var(--color-brand)`,
-          borderRadius: "50%",
-          animation: "spin 0.8s linear infinite",
-          marginBottom: 4,
-        }} />
+        <div
+          style={{
+            width: 22,
+            height: 22,
+            border: `2px solid var(--color-border)`,
+            borderTop: `2px solid var(--color-brand)`,
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+            marginBottom: 4,
+          }}
+        />
       ) : (
-        <div style={{ fontSize: 32, color: "var(--color-border-2)", lineHeight: 1, marginBottom: 4 }}>{icon}</div>
+        <div
+          style={{ fontSize: 32, color: "var(--color-border-2)", lineHeight: 1, marginBottom: 4 }}
+        >
+          {icon}
+        </div>
       )}
       <p style={{ fontSize: 14, color: "var(--color-ink-3)", fontWeight: 500 }}>{title}</p>
       {hint && <p style={{ fontSize: 12, color: "var(--color-border-2)" }}>{hint}</p>}

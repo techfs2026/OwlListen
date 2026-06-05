@@ -12,7 +12,15 @@ interface LabelListProps {
   onUpdateText: (id: string, text: string) => void;
 }
 
-export function LabelList({ labels, selectedId, overlappingIds, onSelect, onRemove, onJumpTo, onUpdateText }: LabelListProps) {
+export function LabelList({
+  labels,
+  selectedId,
+  overlappingIds,
+  onSelect,
+  onRemove,
+  onJumpTo,
+  onUpdateText,
+}: LabelListProps) {
   return (
     <div style={s.container}>
       {labels.length === 0 ? (
@@ -37,7 +45,11 @@ export function LabelList({ labels, selectedId, overlappingIds, onSelect, onRemo
           ))}
           <div style={s.addHint}>
             <div style={s.addIcon}>+</div>
-            <div style={s.addText}>拖拽添加<br />片段</div>
+            <div style={s.addText}>
+              拖拽添加
+              <br />
+              片段
+            </div>
           </div>
         </>
       )}
@@ -68,26 +80,49 @@ function fmtDur(sec: number): string {
   return sec < 1 ? `${(sec * 1000).toFixed(0)}ms` : `${sec.toFixed(2)}s`;
 }
 
-function LabelCard({ label, index, selected, overlapping, onSelect, onRemove, onJumpTo, onUpdateText }: LabelCardProps) {
+function LabelCard({
+  label,
+  index,
+  selected,
+  overlapping,
+  onSelect,
+  onRemove,
+  onJumpTo,
+  onUpdateText,
+}: LabelCardProps) {
   const cardStyle: React.CSSProperties = {
     ...s.card,
     borderColor: overlapping ? "#FCA5A5" : selected ? "var(--color-brand)" : undefined,
     boxShadow: overlapping
       ? "0 0 0 2px #FEE2E2"
       : selected
-      ? `0 0 0 2px var(--color-brand-soft), 0 1px 3px rgba(26,39,68,0.08)`
-      : "0 1px 3px rgba(26,39,68,0.05)",
-    background: overlapping ? "#FFF5F5" : selected ? "var(--color-brand-soft)" : "var(--color-paper)",
+        ? `0 0 0 2px var(--color-brand-soft), 0 1px 3px rgba(26,39,68,0.08)`
+        : "0 1px 3px rgba(26,39,68,0.05)",
+    background: overlapping
+      ? "#FFF5F5"
+      : selected
+        ? "var(--color-brand-soft)"
+        : "var(--color-paper)",
   };
 
   return (
     <div style={cardStyle} onClick={onSelect}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ ...s.cardNum, color: overlapping ? "#DC2626" : selected ? "var(--color-brand)" : "var(--color-ink-3)" }}>#{index}</div>
+        <div
+          style={{
+            ...s.cardNum,
+            color: overlapping ? "#DC2626" : selected ? "var(--color-brand)" : "var(--color-ink-3)",
+          }}
+        >
+          #{index}
+        </div>
         <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
           {overlapping && <div style={s.overlapBadge}>⚠ 重叠</div>}
           {selected && !overlapping && (
-            <div style={s.selectedBadge}><span style={s.selectedDot} />选中</div>
+            <div style={s.selectedBadge}>
+              <span style={s.selectedDot} />
+              选中
+            </div>
           )}
         </div>
       </div>
@@ -99,7 +134,8 @@ function LabelCard({ label, index, selected, overlapping, onSelect, onRemove, on
       </div>
       {selected && (
         <div style={s.nudgeHint}>
-          <kbd style={s.kbdTiny}>←→</kbd><span>切换区段</span>
+          <kbd style={s.kbdTiny}>←→</kbd>
+          <span>切换区段</span>
         </div>
       )}
       <input
@@ -110,8 +146,24 @@ function LabelCard({ label, index, selected, overlapping, onSelect, onRemove, on
         onChange={(e) => onUpdateText(e.target.value)}
       />
       <div style={s.cardActions}>
-        <button style={s.actionBtn} onClick={(e) => { e.stopPropagation(); onJumpTo(); }}>定位</button>
-        <button style={{ ...s.actionBtn, ...s.dangerBtn }} onClick={(e) => { e.stopPropagation(); onRemove(); }}>删除</button>
+        <button
+          style={s.actionBtn}
+          onClick={(e) => {
+            e.stopPropagation();
+            onJumpTo();
+          }}
+        >
+          定位
+        </button>
+        <button
+          style={{ ...s.actionBtn, ...s.dangerBtn }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          删除
+        </button>
       </div>
     </div>
   );

@@ -17,16 +17,31 @@ import { ShortcutModal } from "./ShortcutModal";
 import { SidebarIcon } from "./icons";
 import "./AudiobookScreen.scss";
 
-interface AudiobookScreenProps { onBack: () => void; }
+interface AudiobookScreenProps {
+  onBack: () => void;
+}
 
 export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   const {
-    meta, playState,
-    currentChapter, currentChapterIndex, currentTime, speed,
-    recentBooks, autoAdvance, error,
-    openBook, play, pause, seekInChapter,
-    goToChapter, nextChapter, prevChapter, setSpeed,
-    setAutoAdvance, clearError,
+    meta,
+    playState,
+    currentChapter,
+    currentChapterIndex,
+    currentTime,
+    speed,
+    recentBooks,
+    autoAdvance,
+    error,
+    openBook,
+    play,
+    pause,
+    seekInChapter,
+    goToChapter,
+    nextChapter,
+    prevChapter,
+    setSpeed,
+    setAutoAdvance,
+    clearError,
   } = useAudiobook();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -36,34 +51,40 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   const [localRecent, setLocalRecent] = useState<RecentBook[]>([]);
 
   // hook 数据来了就同步覆盖（包括删到 0 的情况，所以不要 length > 0 守卫）
-  useEffect(() => { setLocalRecent(recentBooks); }, [recentBooks]);
+  useEffect(() => {
+    setLocalRecent(recentBooks);
+  }, [recentBooks]);
 
-  const openBookWithCover = useCallback(async (path: string) => {
-    setCover(null);
-    try {
-      await openBook(path);
-      const c = await getAudiobookCover(path);
-      setCover(c);
-    } catch (err) {
-      console.error("[audiobook] open failed:", err);
-    }
-  }, [openBook]);
+  const openBookWithCover = useCallback(
+    async (path: string) => {
+      setCover(null);
+      try {
+        await openBook(path);
+        const c = await getAudiobookCover(path);
+        setCover(c);
+      } catch (err) {
+        console.error("[audiobook] open failed:", err);
+      }
+    },
+    [openBook],
+  );
 
   const handleOpenBook = useCallback(async () => {
     const path = await open({
       multiple: false,
-      filters: [
-        { name: "有声书", extensions: ["m4b"] },
-      ],
+      filters: [{ name: "有声书", extensions: ["m4b"] }],
     });
     if (typeof path === "string") {
       await openBookWithCover(path);
     }
   }, [openBook]);
 
-  const handleOpenRecent = useCallback(async (book: RecentBook) => {
-    await openBookWithCover(book.path);
-  }, [openBookWithCover]);
+  const handleOpenRecent = useCallback(
+    async (book: RecentBook) => {
+      await openBookWithCover(book.path);
+    },
+    [openBookWithCover],
+  );
 
   const handleRemoveRecent = useCallback(async (book: RecentBook) => {
     setLocalRecent((list) => list.filter((b) => b.path !== book.path));
@@ -91,10 +112,16 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
           openBookWithCover(path);
         }
       })
-      .then((fn) => { unlisten = fn; })
-      .catch((err) => { console.error("[audiobook] drag listener:", err); });
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((err) => {
+        console.error("[audiobook] drag listener:", err);
+      });
 
-    return () => { unlisten?.(); };
+    return () => {
+      unlisten?.();
+    };
   }, [openBook]);
 
   useEffect(() => {
@@ -103,20 +130,31 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
       if (tag === "INPUT" || tag === "TEXTAREA") return;
 
       switch (e.key) {
-        case " ":
-          {
-            e.preventDefault();
-            if (playState === "playing") pause();
-            else if (playState === "ready" || playState === "paused") play();
-            break;
-          }
+        case " ": {
+          e.preventDefault();
+          if (playState === "playing") pause();
+          else if (playState === "ready" || playState === "paused") play();
+          break;
+        }
         case "j":
-        case "J": e.preventDefault(); prevChapter(); break;
+        case "J":
+          e.preventDefault();
+          prevChapter();
+          break;
         case "l":
-        case "L": e.preventDefault(); nextChapter(); break;
+        case "L":
+          e.preventDefault();
+          nextChapter();
+          break;
         case "h":
-        case "H": e.preventDefault(); setShowHelp((v) => !v); break;
-        case "Escape": e.preventDefault(); if (showHelp) setShowHelp(false); break;
+        case "H":
+          e.preventDefault();
+          setShowHelp((v) => !v);
+          break;
+        case "Escape":
+          e.preventDefault();
+          if (showHelp) setShowHelp(false);
+          break;
       }
     };
     window.addEventListener("keydown", handler);
@@ -135,11 +173,11 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   }, [playState]);
 
   return (
-    <div
-      className="audiobook"
-    >
+    <div className="audiobook">
       <div className="audiobook__toolbar">
-        <button className="btn btn--ghost btn--sm" onClick={onBack}>← 返回</button>
+        <button className="btn btn--ghost btn--sm" onClick={onBack}>
+          ← 返回
+        </button>
         <span className="audiobook__mode-tag">有声书</span>
 
         <button
@@ -159,9 +197,7 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
         {meta && (
           <div className="audiobook__book-info">
             <span className="audiobook__book-title">{meta.title}</span>
-            {meta.author && (
-              <span className="audiobook__book-author">{meta.author}</span>
-            )}
+            {meta.author && <span className="audiobook__book-author">{meta.author}</span>}
           </div>
         )}
 
@@ -179,7 +215,9 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
       {error && (
         <div className="audiobook__error" role="alert">
           <span className="audiobook__error-msg">{error}</span>
-          <button className="audiobook__error-close" onClick={clearError} aria-label="关闭提示">✕</button>
+          <button className="audiobook__error-close" onClick={clearError} aria-label="关闭提示">
+            ✕
+          </button>
         </div>
       )}
 
@@ -242,12 +280,7 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
 
       {showHelp && <ShortcutModal onClose={() => setShowHelp(false)} />}
 
-      {showLoadingModal && (
-        <LoadingModal
-          title="正在打开有声书"
-          subtitle={meta?.title}
-        />
-      )}
+      {showLoadingModal && <LoadingModal title="正在打开有声书" subtitle={meta?.title} />}
     </div>
   );
 }

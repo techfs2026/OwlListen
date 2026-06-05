@@ -18,7 +18,7 @@ function chooseTick(dur: number): number {
   // 目标约 8~12 个刻度
   const ideal = dur / 10;
   return targets.reduce((prev, cur) =>
-    Math.abs(cur - ideal) < Math.abs(prev - ideal) ? cur : prev
+    Math.abs(cur - ideal) < Math.abs(prev - ideal) ? cur : prev,
   );
 }
 
@@ -38,35 +38,42 @@ export function TimeAxis({ viewRange, width }: TimeAxisProps) {
   }, [startSec, endSec, dur, width]);
 
   return (
-    <div style={{
-      position: "relative",
-      height: 24,
-      borderTop: `0.5px solid var(--color-border)`,
-      background: "var(--color-paper)",
-      flexShrink: 0,
-    }}>
+    <div
+      style={{
+        position: "relative",
+        height: 24,
+        borderTop: `0.5px solid var(--color-border)`,
+        background: "var(--color-paper)",
+        flexShrink: 0,
+      }}
+    >
       {ticks.map((t) => {
         const pct = ((t - startSec) / dur) * 100;
         if (pct < 0 || pct > 100) return null;
         return (
-          <div key={t} style={{
-            position: "absolute",
-            left: `${pct}%`,
-            top: 0,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            transform: "translateX(-50%)",
-          }}>
+          <div
+            key={t}
+            style={{
+              position: "absolute",
+              left: `${pct}%`,
+              top: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              transform: "translateX(-50%)",
+            }}
+          >
             <div style={{ width: 0.5, height: 5, background: "var(--color-ink-3)" }} />
-            <span style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              color: "var(--color-ink-3)",
-              marginTop: 2,
-              whiteSpace: "nowrap",
-              userSelect: "none",
-            }}>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                color: "var(--color-ink-3)",
+                marginTop: 2,
+                whiteSpace: "nowrap",
+                userSelect: "none",
+              }}
+            >
               {formatTime(t)}
             </span>
           </div>

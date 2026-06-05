@@ -20,7 +20,7 @@ interface UseWaveformReturn {
   scrollBy: (deltaSec: number) => void;
 }
 
-const MIN_VISIBLE_SECS = 0.001;  // 允许深度放大到 1ms 视图,触发 Polyline/Stem 模式
+const MIN_VISIBLE_SECS = 0.001; // 允许深度放大到 1ms 视图,触发 Polyline/Stem 模式
 
 export function useWaveform(): UseWaveformReturn {
   const [audioInfo, setAudioInfo] = useState<AudioInfo | null>(null);
@@ -54,63 +54,57 @@ export function useWaveform(): UseWaveformReturn {
         setLoadingState("error");
       }
     },
-    []
+    [],
   );
 
   const reqIdRef = useRef(0);
 
-  const fetchPeaks = useCallback(async (pixelWidth: number) => {
-    const myId = ++reqIdRef.current;
-    const data = await getPeaks(viewRange.startSec, viewRange.endSec, pixelWidth);
-    if (myId !== reqIdRef.current) return null;  // 已被新请求覆盖
-    return data;
-  }, [viewRange]);
+  const fetchPeaks = useCallback(
+    async (pixelWidth: number) => {
+      const myId = ++reqIdRef.current;
+      const data = await getPeaks(viewRange.startSec, viewRange.endSec, pixelWidth);
+      if (myId !== reqIdRef.current) return null; // 已被新请求覆盖
+      return data;
+    },
+    [viewRange],
+  );
 
-  const setViewRange = useCallback(
-    (range: ViewRange) => {
+  const setViewRange = useCallback((range: ViewRange) => {
+    const duration = audioInfoRef.current?.duration ?? Infinity;
+    const dur = Math.max(range.endSec - range.startSec, MIN_VISIBLE_SECS);
+    const start = Math.max(0, Math.min(range.startSec, duration - dur));
+    const end = Math.min(start + dur, duration);
+    setViewRangeState({ startSec: start, endSec: end });
+  }, []);
+
+  const zoomIn = useCallback((centerSec?: number) => {
+    setViewRangeState((prev) => {
+      const dur = prev.endSec - prev.startSec;
+      if (dur <= MIN_VISIBLE_SECS) return prev;
+      const center = centerSec ?? prev.startSec + dur * 0.5;
+      const newDur = Math.max(dur * 0.6, MIN_VISIBLE_SECS);
+      const start = Math.max(0, center - newDur * 0.5);
+      const end = start + newDur;
       const duration = audioInfoRef.current?.duration ?? Infinity;
-      const dur = Math.max(range.endSec - range.startSec, MIN_VISIBLE_SECS);
-      const start = Math.max(0, Math.min(range.startSec, duration - dur));
-      const end = Math.min(start + dur, duration);
-      setViewRangeState({ startSec: start, endSec: end });
-    },
-    []
-  );
+      return {
+        startSec: Math.min(start, duration - newDur),
+        endSec: Math.min(end, duration),
+      };
+    });
+  }, []);
 
-  const zoomIn = useCallback(
-    (centerSec?: number) => {
-      setViewRangeState((prev) => {
-        const dur = prev.endSec - prev.startSec;
-        if (dur <= MIN_VISIBLE_SECS) return prev;
-        const center = centerSec ?? prev.startSec + dur * 0.5;
-        const newDur = Math.max(dur * 0.6, MIN_VISIBLE_SECS);
-        const start = Math.max(0, center - newDur * 0.5);
-        const end = start + newDur;
-        const duration = audioInfoRef.current?.duration ?? Infinity;
-        return {
-          startSec: Math.min(start, duration - newDur),
-          endSec: Math.min(end, duration),
-        };
-      });
-    },
-    []
-  );
-
-  const zoomOut = useCallback(
-    (centerSec?: number) => {
-      setViewRangeState((prev) => {
-        const dur = prev.endSec - prev.startSec;
-        const duration = audioInfoRef.current?.duration ?? Infinity;
-        if (dur >= duration) return prev;
-        const center = centerSec ?? prev.startSec + dur * 0.5;
-        const newDur = Math.min(dur / 0.6, duration);
-        const start = Math.max(0, center - newDur * 0.5);
-        const end = Math.min(start + newDur, duration);
-        return { startSec: start, endSec: end };
-      });
-    },
-    []
-  );
+  const zoomOut = useCallback((centerSec?: number) => {
+    setViewRangeState((prev) => {
+      const dur = prev.endSec - prev.startSec;
+      const duration = audioInfoRef.current?.duration ?? Infinity;
+      if (dur >= duration) return prev;
+      const center = centerSec ?? prev.startSec + dur * 0.5;
+      const newDur = Math.min(dur / 0.6, duration);
+      const start = Math.max(0, center - newDur * 0.5);
+      const end = Math.min(start + newDur, duration);
+      return { startSec: start, endSec: end };
+    });
+  }, []);
 
   const zoomReset = useCallback(() => {
     const duration = audioInfoRef.current?.duration;

@@ -13,9 +13,7 @@ function pathBasename(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-export function EmptyState({
-  recentBooks, onOpenRecent, onRemoveRecent,
-}: EmptyStateProps) {
+export function EmptyState({ recentBooks, onOpenRecent, onRemoveRecent }: EmptyStateProps) {
   const [hoverPath, setHoverPath] = useState<string | null>(null);
 
   return (
@@ -46,14 +44,13 @@ export function EmptyState({
                     <div className="recent-card__title">
                       {book.title || pathBasename(book.path)}
                     </div>
-                    {book.author && (
-                      <div className="recent-card__author">{book.author}</div>
-                    )}
+                    {book.author && <div className="recent-card__author">{book.author}</div>}
                   </div>
                 </button>
                 <button
-                  className={`recent-card__remove${hoverPath === book.path ? " recent-card__remove--visible" : ""
-                    }`}
+                  className={`recent-card__remove${
+                    hoverPath === book.path ? " recent-card__remove--visible" : ""
+                  }`}
                   onClick={(e) => {
                     e.stopPropagation();
                     onRemoveRecent(book);

@@ -5,78 +5,87 @@
 
 // 文本单行省略
 @mixin text-ellipsis {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// 文本多行省略
+@mixin text-clamp($lines: 2) {
+  display: -webkit-box;
+  -webkit-line-clamp: $lines;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+// 按钮基础重置（去除浏览器默认样式）
+@mixin button-reset {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  user-select: none;
+
+  &:focus {
+    outline: none;
   }
-  
-  // 文本多行省略
-  @mixin text-clamp($lines: 2) {
-    display: -webkit-box;
-    -webkit-line-clamp: $lines;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+  &:focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
   }
-  
-  // 按钮基础重置（去除浏览器默认样式）
-  @mixin button-reset {
-    appearance: none;
-    background: none;
-    border: none;
-    padding: 0;
-    margin: 0;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-    user-select: none;
-  
-    &:focus { outline: none; }
-    &:focus-visible {
-      outline: 2px solid var(--color-brand);
-      outline-offset: 2px;
-    }
-    &:disabled { cursor: not-allowed; }
+  &:disabled {
+    cursor: not-allowed;
   }
-  
-  // 居中绝对定位
-  @mixin absolute-center {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+}
+
+// 居中绝对定位
+@mixin absolute-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+// 美观的细滚动条
+@mixin scrollbar-thin {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
   }
-  
-  // 美观的细滚动条
-  @mixin scrollbar-thin {
-    &::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    &::-webkit-scrollbar-track { background: transparent; }
-    &::-webkit-scrollbar-thumb {
-      background: var(--color-border-2);
-      border-radius: var(--radius-full);
-      &:hover { background: var(--color-ink-3); }
-    }
+  &::-webkit-scrollbar-track {
+    background: transparent;
   }
-  
-  // 卡片容器
-  @mixin card {
-    background: var(--color-paper);
-    border: 0.5px solid var(--color-border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-  }
-  
-  // hover 态柔和悬浮（用于按钮、列表项）
-  @mixin hover-lift {
-    transition: background var(--duration-fast) var(--ease-out),
-                box-shadow var(--duration-fast) var(--ease-out),
-                transform var(--duration-fast) var(--ease-out);
-    &:hover:not(:disabled) {
-      background: var(--color-hover-overlay);
-    }
-    &:active:not(:disabled) {
-      background: var(--color-active-overlay);
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-border-2);
+    border-radius: var(--radius-full);
+    &:hover {
+      background: var(--color-ink-3);
     }
   }
+}
+
+// 卡片容器
+@mixin card {
+  background: var(--color-paper);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+// hover 态柔和悬浮（用于按钮、列表项）
+@mixin hover-lift {
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out);
+  &:hover:not(:disabled) {
+    background: var(--color-hover-overlay);
+  }
+  &:active:not(:disabled) {
+    background: var(--color-active-overlay);
+  }
+}

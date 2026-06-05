@@ -25,12 +25,12 @@ export interface Peak {
 export type ChannelData =
   | { kind: "envelope"; peaks: Peak[] }
   | { kind: "polyline"; points: Array<[number, number]> }
-  | { kind: "stem";     points: Array<[number, number]> };
+  | { kind: "stem"; points: Array<[number, number]> };
 
 /** 一次 getPeaks 调用的完整返回 */
 export interface RenderData {
   mode: RenderMode;
-  channels: ChannelData[];     // length === AudioInfo.channelCount
+  channels: ChannelData[]; // length === AudioInfo.channelCount
   pixelWidth: number;
 }
 
@@ -66,15 +66,15 @@ export interface WaveformColors {
 export const DEFAULT_COLORS: WaveformColors = {
   // Audacity 经典波形配色 - 深蓝调
   // 包络和 RMS 颜色相近,只靠"内层略深"区分层次
-  wave:           "#2C4A8C",   // 包络
-  waveRms:        "#2C4A8C",   // RMS
-  playhead:       "#1F2937",   // 接近黑的深灰
-  labelFill:      "#BFDBFE",
-  labelBorder:    "#3B82F6",
-  selection:      "#FDE68A",   // Audacity 选区是黄色
-  background:     "#F0F2F8",   // 极浅蓝灰,Audacity 主区域风格
-  centerLine:     "#1F2937",   // 接近黑细线
-  channelDivider: "#1F2937",   // 立体声分隔线
+  wave: "#2C4A8C", // 包络
+  waveRms: "#2C4A8C", // RMS
+  playhead: "#1F2937", // 接近黑的深灰
+  labelFill: "#BFDBFE",
+  labelBorder: "#3B82F6",
+  selection: "#FDE68A", // Audacity 选区是黄色
+  background: "#F0F2F8", // 极浅蓝灰,Audacity 主区域风格
+  centerLine: "#1F2937", // 接近黑细线
+  channelDivider: "#1F2937", // 立体声分隔线
 };
 
 export interface GlResources {

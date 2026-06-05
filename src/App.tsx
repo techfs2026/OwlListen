@@ -7,8 +7,8 @@ import { AudiobookScreen } from "@/components/audiobook/AudiobookScreen";
 export default function App() {
   const [mode, setMode] = useState<AppMode>("home");
 
-  if (mode === "annotate")  return <AnnotateScreen  onBack={() => setMode("home")} />;
-  if (mode === "listen")    return <ListenScreen    onBack={() => setMode("home")} />;
+  if (mode === "annotate") return <AnnotateScreen onBack={() => setMode("home")} />;
+  if (mode === "listen") return <ListenScreen onBack={() => setMode("home")} />;
   if (mode === "audiobook") return <AudiobookScreen onBack={() => setMode("home")} />;
   return <HomeScreen onSelect={setMode} />;
 }

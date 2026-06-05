@@ -21,7 +21,7 @@ import {
 export type PlayState = "idle" | "loading" | "ready" | "playing" | "paused";
 
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75] as const;
-export type Speed = typeof SPEEDS[number];
+export type Speed = (typeof SPEEDS)[number];
 
 const SAVE_INTERVAL_MS = 5000;
 
@@ -58,7 +58,7 @@ export function useAudiobook(): UseAudiobookReturn {
   const [recentBooks, setRecentBooks] = useState<RecentBook[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [autoAdvance, setAutoAdvanceState] = useState<boolean>(
-    () => localStorage.getItem("audiobook.autoAdvance") !== "false"
+    () => localStorage.getItem("audiobook.autoAdvance") !== "false",
   );
 
   const currentTimeRef = useRef(0);
@@ -67,9 +67,13 @@ export function useAudiobook(): UseAudiobookReturn {
   const chapterIndexRef = useRef(0);
   const lastSavedAtRef = useRef(0);
   const metaRef = useRef<AudiobookMeta | null>(null);
-  useEffect(() => { metaRef.current = meta; }, [meta]);
+  useEffect(() => {
+    metaRef.current = meta;
+  }, [meta]);
   const autoAdvanceRef = useRef(autoAdvance);
-  useEffect(() => { autoAdvanceRef.current = autoAdvance; }, [autoAdvance]);
+  useEffect(() => {
+    autoAdvanceRef.current = autoAdvance;
+  }, [autoAdvance]);
 
   // 监听后端进度推送
   useEffect(() => {
@@ -86,20 +90,31 @@ export function useAudiobook(): UseAudiobookReturn {
       const now = Date.now();
       if (playing && now - lastSavedAtRef.current > SAVE_INTERVAL_MS) {
         lastSavedAtRef.current = now;
-        saveAudiobookProgress(bookPathRef.current, chapterIndex, positionSec)
-          .catch(() => { });
+        saveAudiobookProgress(bookPathRef.current, chapterIndex, positionSec).catch(() => {});
       }
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
-    getRecentAudiobooks().then(setRecentBooks).catch(() => { });
+    getRecentAudiobooks()
+      .then(setRecentBooks)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
-    listen<{ chapterIndex: number }>("playback-chapter-ended", () => {
+    listen<{ chapterIndex: number }>("playback-chapter-ended", (event) => {
+      // 幂等守卫：只处理"当前所在章"的结束事件。StrictMode 下 listen 的异步 cleanup
+      // 竞态可能留下重复监听器，使同一个章末事件触发两次；第一次处理后 chapterIndexRef
+      // 已前进，重复/过期事件（endedIdx 不等于当前章）在此被忽略，避免连跳两章。
+      const endedIdx = event.payload.chapterIndex;
+      if (endedIdx !== chapterIndexRef.current) return;
+
       const meta = metaRef.current;
       const cur = chapterIndexRef.current;
       const hasNext = !!meta && cur < meta.chapters.length - 1;
@@ -122,10 +137,14 @@ export function useAudiobook(): UseAudiobookReturn {
       }
 
       // 否则（关了续播，或已是最后一章）：停在章末，暂停后端避免空转
-      playbackPause().catch(() => { });
+      playbackPause().catch(() => {});
       setPlayState("paused");
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   // 后端解码出错 → 提示用户（否则只会静默冻住）
@@ -135,8 +154,12 @@ export function useAudiobook(): UseAudiobookReturn {
       console.error("[audiobook] playback error:", event.payload.message);
       setError("播放出错，音频可能已损坏。请重新打开或换一本。");
       setPlayState("paused");
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   const openBook = useCallback(async (path: string) => {
@@ -159,7 +182,7 @@ export function useAudiobook(): UseAudiobookReturn {
       pushRecentAudiobook(path, bookMeta.title, bookMeta.author)
         .then(() => getRecentAudiobooks())
         .then(setRecentBooks)
-        .catch(() => { });
+        .catch(() => {});
 
       const chIdx = Math.min(progress.chapterIndex, bookMeta.chapters.length - 1);
       const posSec = progress.positionSec;
@@ -190,13 +213,17 @@ export function useAudiobook(): UseAudiobookReturn {
 
   const pause = useCallback(() => {
     playbackPause().catch((e) => console.error("[audiobook] pause:", e));
-    saveAudiobookProgress(bookPathRef.current, chapterIndexRef.current, currentTimeRef.current)
-      .catch(() => { });
+    saveAudiobookProgress(
+      bookPathRef.current,
+      chapterIndexRef.current,
+      currentTimeRef.current,
+    ).catch(() => {});
   }, []);
 
   const seekInChapter = useCallback((sec: number) => {
-    playbackSeek(chapterIndexRef.current, Math.max(0, sec))
-      .catch((e) => console.error("[audiobook] seek:", e));
+    playbackSeek(chapterIndexRef.current, Math.max(0, sec)).catch((e) =>
+      console.error("[audiobook] seek:", e),
+    );
   }, []);
 
   const goToChapter = useCallback((index: number, positionSec = 0) => {
@@ -217,7 +244,7 @@ export function useAudiobook(): UseAudiobookReturn {
       })
       .catch((e) => console.error("[audiobook] goToChapter:", e));
   }, []);
-  
+
   const nextChapter = useCallback(() => {
     const meta = metaRef.current;
     if (!meta) return;
@@ -236,14 +263,14 @@ export function useAudiobook(): UseAudiobookReturn {
         .catch((e) => console.error("[audiobook] next:", e));
     }
   }, []);
-  
+
   const prevChapter = useCallback(() => {
     const applySpeed = () => {
       if (speedRef.current !== 1) {
         playbackSetSpeed(speedRef.current).catch(() => {});
       }
     };
-  
+
     if (currentTimeRef.current > 3) {
       currentTimeRef.current = 0;
       setCurrentTime(0);
@@ -283,17 +310,33 @@ export function useAudiobook(): UseAudiobookReturn {
 
   // 卸载时关闭引擎
   useEffect(() => {
-    return () => { playbackClose().catch(() => { }); };
+    return () => {
+      playbackClose().catch(() => {});
+    };
   }, []);
 
   const currentChapter = meta?.chapters[currentChapterIndex] ?? null;
 
   return {
-    meta, bookPath, playState,
-    currentChapter, currentChapterIndex, currentTime, speed,
-    recentBooks, autoAdvance, error,
-    openBook, play, pause, seekInChapter,
-    goToChapter, nextChapter, prevChapter, setSpeed,
-    setAutoAdvance, clearError,
+    meta,
+    bookPath,
+    playState,
+    currentChapter,
+    currentChapterIndex,
+    currentTime,
+    speed,
+    recentBooks,
+    autoAdvance,
+    error,
+    openBook,
+    play,
+    pause,
+    seekInChapter,
+    goToChapter,
+    nextChapter,
+    prevChapter,
+    setSpeed,
+    setAutoAdvance,
+    clearError,
   };
 }

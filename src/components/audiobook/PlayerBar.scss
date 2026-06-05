@@ -58,7 +58,7 @@
 
   &__progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--color-brand), #60A5FA);
+    background: linear-gradient(90deg, var(--color-brand), #60a5fa);
     pointer-events: none;
     border-radius: 2px;
   }
@@ -72,10 +72,12 @@
     height: 12px;
     border-radius: 50%;
     background: var(--color-brand);
-    box-shadow: 0 0 0 2px var(--color-paper),
+    box-shadow:
+      0 0 0 2px var(--color-paper),
       0 1px 3px rgba(26, 39, 68, 0.2);
     pointer-events: none;
-    transition: width var(--duration-fast) var(--ease-out),
+    transition:
+      width var(--duration-fast) var(--ease-out),
       height var(--duration-fast) var(--ease-out);
   }
 
@@ -113,42 +115,63 @@
     }
   }
 
+  // 连播开关（label + iOS 风格滑动开关）
   &__autoplay {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
     font-family: var(--font-mono);
     font-size: var(--font-size-sm);
-    border: 0.5px solid var(--color-border-2);
-    border-radius: var(--radius-md);
-    padding: 4px var(--space-2);
-    cursor: pointer;
-    background: var(--color-paper-2);
     color: var(--color-ink-3);
-    transition: background var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out),
-      border-color var(--duration-fast) var(--ease-out);
+    padding: 4px 2px;
+    transition: color var(--duration-fast) var(--ease-out);
 
-    &:hover { color: var(--color-brand); }
+    &:hover {
+      color: var(--color-brand);
+    }
 
     &--active {
       color: var(--color-brand);
-      background: var(--color-brand-soft);
-      border-color: var(--color-brand-mid);
-      font-weight: 600;
     }
   }
 
-  &__autoplay-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--color-ink-3);
-    flex-shrink: 0;
+  &__autoplay-label {
+    user-select: none;
   }
 
-  &__autoplay--active &__autoplay-dot {
+  // 开关轨道
+  &__switch {
+    position: relative;
+    width: 30px;
+    height: 16px;
+    border-radius: var(--radius-full);
+    background: var(--color-border-2);
+    flex-shrink: 0;
+    transition: background var(--duration-fast) var(--ease-out);
+  }
+
+  &__autoplay--active &__switch {
     background: var(--color-brand);
+  }
+
+  // 开关滑块
+  &__switch-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(26, 39, 68, 0.25);
+    transition: transform var(--duration-fast) var(--ease-out);
+  }
+
+  &__autoplay--active &__switch-knob {
+    transform: translateX(14px);
   }
 
   &__skip {
@@ -173,7 +196,8 @@
     cursor: pointer;
     background: transparent;
     color: var(--color-ink-3);
-    transition: background var(--duration-fast) var(--ease-out),
+    transition:
+      background var(--duration-fast) var(--ease-out),
       color var(--duration-fast) var(--ease-out);
 
     &:hover:not(.player-bar__speed--active) {

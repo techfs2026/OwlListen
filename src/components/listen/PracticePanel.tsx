@@ -59,33 +59,34 @@ export function PracticePanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const textareaFocusedRef = useRef(false);
 
-  const {
-    playState, currentTime, duration,
-    load, play, pause, seek,
-  } = useAudioPlayer();
+  const { playState, currentTime, duration, load, play, pause, seek } = useAudioPlayer();
 
   const playing = playState === "playing";
 
   // ── 语音回调 ──────────────────────────────────────────────────────────────
 
-  const handleTranscript = useCallback((text: string, isFinal: boolean) => {
-    if (isFinal) {
-      const base = confirmedTextRef.current;
-      const joined = base
-        ? (base.endsWith(" ") || base.endsWith("\n") ? base + text : base + " " + text)
-        : text;
-      confirmedTextRef.current = joined;
-      setInterimPreview("");
-      onUpdateText(joined);
-    } else {
-      setInterimPreview(text);
-    }
-  }, [onUpdateText]);
-
-  const { speechState, toggleListening, stopListening } = useSpeechInput(
-    handleTranscript,
-    { model: "small" },
+  const handleTranscript = useCallback(
+    (text: string, isFinal: boolean) => {
+      if (isFinal) {
+        const base = confirmedTextRef.current;
+        const joined = base
+          ? base.endsWith(" ") || base.endsWith("\n")
+            ? base + text
+            : base + " " + text
+          : text;
+        confirmedTextRef.current = joined;
+        setInterimPreview("");
+        onUpdateText(joined);
+      } else {
+        setInterimPreview(text);
+      }
+    },
+    [onUpdateText],
   );
+
+  const { speechState, toggleListening, stopListening } = useSpeechInput(handleTranscript, {
+    model: "small",
+  });
 
   const isListening = speechState === "listening";
   const isTranscribing = speechState === "transcribing";
@@ -107,13 +108,14 @@ export function PracticePanel({
     }
   }, [segState.userText, isListening]);
 
-  const displayText = isListening && interimPreview
-    ? (segState.userText
-        ? (segState.userText.endsWith(" ") || segState.userText.endsWith("\n")
-            ? segState.userText + interimPreview
-            : segState.userText + " " + interimPreview)
-        : interimPreview)
-    : segState.userText;
+  const displayText =
+    isListening && interimPreview
+      ? segState.userText
+        ? segState.userText.endsWith(" ") || segState.userText.endsWith("\n")
+          ? segState.userText + interimPreview
+          : segState.userText + " " + interimPreview
+        : interimPreview
+      : segState.userText;
 
   // ── textarea 焦点状态同步到 ref ──────────────────────────────────────────
 
@@ -146,13 +148,19 @@ export function PracticePanel({
     const win = getCurrentWindow();
     let unlistenFocus: (() => void) | undefined;
 
-    win.onFocusChanged(({ payload: focused }) => {
-      if (focused && !textareaFocusedRef.current) {
-        panelRef.current?.focus();
-      }
-    }).then((fn) => { unlistenFocus = fn; });
+    win
+      .onFocusChanged(({ payload: focused }) => {
+        if (focused && !textareaFocusedRef.current) {
+          panelRef.current?.focus();
+        }
+      })
+      .then((fn) => {
+        unlistenFocus = fn;
+      });
 
-    return () => { unlistenFocus?.(); };
+    return () => {
+      unlistenFocus?.();
+    };
   }, []);
 
   // ── 播放控制 ──────────────────────────────────────────────────────────────
@@ -166,10 +174,13 @@ export function PracticePanel({
 
   const handleSeek = useCallback((sec: number) => seek(sec), [seek]);
 
-  const navTo = useCallback((fn: () => void) => {
-    pause();
-    fn();
-  }, [pause]);
+  const navTo = useCallback(
+    (fn: () => void) => {
+      pause();
+      fn();
+    },
+    [pause],
+  );
 
   const handleToggleFullscreen = useCallback(async () => {
     const win = getCurrentWindow();
@@ -323,9 +334,23 @@ export function PracticePanel({
 
     return () => {
       window.removeEventListener("keydown", handler);
-      unlisten.then(fn => fn());
+      unlisten.then((fn) => fn());
     };
-  }, [handleTogglePlay, handleReplay, hasPrev, hasNext, navTo, onPrev, onNext, handleMarkDone, handleMarkFlagged, handleToggleFullscreen, showHelp, speechUnsupported, toggleListening]);
+  }, [
+    handleTogglePlay,
+    handleReplay,
+    hasPrev,
+    hasNext,
+    navTo,
+    onPrev,
+    onNext,
+    handleMarkDone,
+    handleMarkFlagged,
+    handleToggleFullscreen,
+    showHelp,
+    speechUnsupported,
+    toggleListening,
+  ]);
 
   // ── 渲染 ───────────────────────────────────────────────────────────────────
 
@@ -340,22 +365,22 @@ export function PracticePanel({
   // textarea modifier class
   const textareaClass = [
     "practice__textarea",
-    isListening    ? "practice__textarea--listening"    : "",
+    isListening ? "practice__textarea--listening" : "",
     isTranscribing ? "practice__textarea--transcribing" : "",
-    (!isListening && !isTranscribing && textareaFocused) ? "practice__textarea--focused" : "",
-  ].filter(Boolean).join(" ");
+    !isListening && !isTranscribing && textareaFocused ? "practice__textarea--focused" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const diff = showRef ? computeDiff(segState.userText, segment.text) : null;
 
   return (
-    <div
-      ref={panelRef}
-      className="practice"
-      tabIndex={0}
-    >
+    <div ref={panelRef} className="practice" tabIndex={0}>
       {/* 片段信息 */}
       <div className="practice__seg-info">
-        <span className="practice__seg-num">片段 #{segment.index + 1} / {totalCount}</span>
+        <span className="practice__seg-num">
+          片段 #{segment.index + 1} / {totalCount}
+        </span>
         {segment.label && <span className="practice__seg-label">{segment.label}</span>}
         <span className="practice__seg-dur">{(segment.end - segment.start).toFixed(1)}s</span>
         <div className="practice__seg-actions">
@@ -385,7 +410,9 @@ export function PracticePanel({
         <div className="practice__section-label">
           听写内容
           {!isListening && !isTranscribing && textareaFocused && (
-            <span className="practice__badge practice__badge--focus">输入中 · Esc 退出输入模式</span>
+            <span className="practice__badge practice__badge--focus">
+              输入中 · Esc 退出输入模式
+            </span>
           )}
           {isListening && (
             <span className="practice__badge practice__badge--speech">
@@ -407,9 +434,11 @@ export function PracticePanel({
             <button
               className={[
                 "practice__speech-btn",
-                isListening    ? "practice__speech-btn--active"   : "",
+                isListening ? "practice__speech-btn--active" : "",
                 isTranscribing ? "practice__speech-btn--disabled" : "",
-              ].filter(Boolean).join(" ")}
+              ]
+                .filter(Boolean)
+                .join(" ")}
               onClick={toggleListening}
               disabled={isTranscribing}
               title={
@@ -421,17 +450,11 @@ export function PracticePanel({
               }
             >
               <MicIcon active={isListening} />
-              {isTranscribing
-                ? "转写中…"
-                : isListening
-                  ? "停止录音"
-                  : "语音输入"}
+              {isTranscribing ? "转写中…" : isListening ? "停止录音" : "语音输入"}
               {!isTranscribing && <kbd className="kbd kbd--inline">V</kbd>}
             </button>
             {isListening && interimPreview && (
-              <span className="practice__interim-hint">
-                识别中：{interimPreview}
-              </span>
+              <span className="practice__interim-hint">识别中：{interimPreview}</span>
             )}
           </div>
         )}
@@ -478,9 +501,7 @@ export function PracticePanel({
             <div className="practice__ref-text">
               {segment.text || <em style={{ color: "var(--color-ink-3)" }}>（无转写文本）</em>}
             </div>
-            {segState.userText.trim() && segment.text && diff && (
-              <DiffView result={diff} />
-            )}
+            {segState.userText.trim() && segment.text && diff && <DiffView result={diff} />}
           </>
         )}
       </div>
@@ -538,9 +559,7 @@ const SHORTCUT_GROUPS: { group: string; items: { key: string; label: string }[] 
   },
   {
     group: "对照",
-    items: [
-      { key: "Enter", label: "对照 / 隐藏原文" },
-    ],
+    items: [{ key: "Enter", label: "对照 / 隐藏原文" }],
   },
   {
     group: "导航",
@@ -570,23 +589,37 @@ function ShortcutGrid() {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 32px" }}>
       {SHORTCUT_GROUPS.map((group) => (
-        <div key={group.group} style={{ display: "flex", flexDirection: "column", gap: 0, marginBottom: 16 }}>
-          <div style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "var(--font-size-xs)",
-            letterSpacing: "0.08em",
-            textTransform: "uppercase" as const,
-            color: "var(--color-ink-3)",
-            marginBottom: 6,
-            borderBottom: "0.5px solid var(--color-border)",
-            paddingBottom: 4,
-          }}>
+        <div
+          key={group.group}
+          style={{ display: "flex", flexDirection: "column", gap: 0, marginBottom: 16 }}
+        >
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-size-xs)",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase" as const,
+              color: "var(--color-ink-3)",
+              marginBottom: 6,
+              borderBottom: "0.5px solid var(--color-border)",
+              paddingBottom: 4,
+            }}
+          >
             {group.group}
           </div>
           {group.items.map(({ key, label }) => (
-            <div key={key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "5px 0" }}>
+            <div
+              key={key}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "5px 0" }}
+            >
               <kbd className="kbd">{key}</kbd>
-              <span style={{ fontSize: "var(--font-size-base)", color: "var(--color-ink-1)", fontFamily: "var(--font-sans)" }}>
+              <span
+                style={{
+                  fontSize: "var(--font-size-base)",
+                  color: "var(--color-ink-1)",
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
                 {label}
               </span>
             </div>
@@ -602,8 +635,14 @@ function ShortcutGrid() {
 function MicIcon({ active }: { active: boolean }) {
   return (
     <svg
-      width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       style={{ marginRight: 5, flexShrink: 0 }}
     >
       <rect x="9" y="2" width="6" height="11" rx="3" fill={active ? "currentColor" : "none"} />

@@ -93,14 +93,14 @@ export function usePack(): UsePackReturn {
     });
   }, []);
 
-  const markStatus = useCallback((i: number, status: SegmentStatus) => {
-    updateSegState(i, { status });
-  }, [updateSegState]);
-
-  const getAudioUrl = useCallback(
-    (i: number) => pack.audioBlobUrls.get(i),
-    [pack.audioBlobUrls]
+  const markStatus = useCallback(
+    (i: number, status: SegmentStatus) => {
+      updateSegState(i, { status });
+    },
+    [updateSegState],
   );
+
+  const getAudioUrl = useCallback((i: number) => pack.audioBlobUrls.get(i), [pack.audioBlobUrls]);
 
   const getCurrentSeg = useCallback((): ListenSegment | null => {
     if (!pack.meta) return null;
