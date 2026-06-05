@@ -764,7 +764,6 @@ pub fn remove_recent_audiobook(app: AppHandle, book_path: String) -> Result<(), 
     remove_recent_book(&dir, &book_path).map_err(|e| e.to_string())
 }
 
-
 #[tauri::command]
 pub fn playback_open(
     app: AppHandle,
@@ -776,14 +775,8 @@ pub fn playback_open(
     use crate::audiobook::{parse_audiobook, PlaybackEngine};
 
     let meta = parse_audiobook(&path).map_err(|e| e.to_string())?;
-    let engine = PlaybackEngine::open(
-        &path,
-        meta.chapters,
-        chapter_index,
-        position_sec,
-        app,
-    )
-    .map_err(|e| e.to_string())?;
+    let engine = PlaybackEngine::open(&path, meta.chapters, chapter_index, position_sec, app)
+        .map_err(|e| e.to_string())?;
 
     let mut guard = state.playback.lock().unwrap();
     *guard = Some(engine); // 旧的自动 drop

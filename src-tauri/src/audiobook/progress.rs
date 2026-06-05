@@ -66,11 +66,7 @@ pub fn get_progress(app_data_dir: &str, book_path: &str) -> BookProgress {
         .unwrap_or_default()
 }
 
-pub fn set_progress(
-    app_data_dir: &str,
-    book_path: &str,
-    progress: BookProgress,
-) -> Result<()> {
+pub fn set_progress(app_data_dir: &str, book_path: &str, progress: BookProgress) -> Result<()> {
     let mut store = load_storage(app_data_dir);
     store.progress.insert(book_path.to_string(), progress);
     save_storage(app_data_dir, &store)
@@ -80,12 +76,7 @@ pub fn get_recent_books(app_data_dir: &str) -> Vec<RecentBook> {
     load_storage(app_data_dir).recent_books
 }
 
-pub fn push_recent_book(
-    app_data_dir: &str,
-    path: &str,
-    title: &str,
-    author: &str,
-) -> Result<()> {
+pub fn push_recent_book(app_data_dir: &str, path: &str, title: &str, author: &str) -> Result<()> {
     let mut store = load_storage(app_data_dir);
 
     // 移除已有同路径条目

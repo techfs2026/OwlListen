@@ -1,8 +1,8 @@
 use rayon::prelude::*;
 use wide::f32x8;
 
-use crate::audio::decoder::DecodedAudio;
 use super::peak::{ChannelPyramid, Peak, WaveformSummary};
+use crate::audio::decoder::DecodedAudio;
 
 /// 根据音频时长自动选 base_block_size
 fn choose_base_block_size(duration_secs: f64) -> usize {
@@ -53,11 +53,7 @@ pub fn build_summary(audio: &DecodedAudio) -> WaveformSummary {
 }
 
 /// 单声道金字塔构建:Level 0 并行 + 上层串行
-fn build_channel_pyramid(
-    samples: &[f32],
-    base_block: usize,
-    upper_block: usize,
-) -> ChannelPyramid {
+fn build_channel_pyramid(samples: &[f32], base_block: usize, upper_block: usize) -> ChannelPyramid {
     let level0 = build_level0_parallel(samples, base_block);
     log::debug!("  Level 0: {} peaks", level0.len());
 
@@ -157,7 +153,11 @@ fn compute_peak_simd(slice: &[f32]) -> Peak {
 
     let rms = (sum_sq / n as f32).sqrt();
 
-    Peak { min: mn, max: mx, rms }
+    Peak {
+        min: mn,
+        max: mx,
+        rms,
+    }
 }
 
 /// 上层:把下层 block_size 个 Peak 压缩为 1 个
@@ -184,7 +184,11 @@ fn build_upper_level(prev: &[Peak], block_size: usize) -> Vec<Peak> {
                 sum_sq += p.rms * p.rms;
             }
             let rms = (sum_sq / slice.len() as f32).sqrt();
-            Peak { min: mn, max: mx, rms }
+            Peak {
+                min: mn,
+                max: mx,
+                rms,
+            }
         })
         .collect()
 }

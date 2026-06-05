@@ -23,8 +23,7 @@ pub struct AudiobookMeta {
 pub fn parse_audiobook(path: &str) -> Result<AudiobookMeta> {
     ffmpeg::init().context("FFmpeg init failed")?;
 
-    let input = ffmpeg::format::input(&path)
-        .with_context(|| format!("Cannot open: {path}"))?;
+    let input = ffmpeg::format::input(&path).with_context(|| format!("Cannot open: {path}"))?;
 
     let duration_sec = input.duration() as f64 / ffmpeg::ffi::AV_TIME_BASE as f64;
 
@@ -66,10 +65,20 @@ pub fn parse_audiobook(path: &str) -> Result<AudiobookMeta> {
                     .get("title")
                     .unwrap_or(&format!("第 {} 章", i + 1))
                     .to_string();
-                Chapter { index: i, title: ch_title, start_sec, end_sec }
+                Chapter {
+                    index: i,
+                    title: ch_title,
+                    start_sec,
+                    end_sec,
+                }
             })
             .collect()
     };
 
-    Ok(AudiobookMeta { title, author, duration_sec, chapters })
+    Ok(AudiobookMeta {
+        title,
+        author,
+        duration_sec,
+        chapters,
+    })
 }

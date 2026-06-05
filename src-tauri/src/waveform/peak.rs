@@ -17,7 +17,11 @@ impl Peak {
     /// 用于"空区间"占位的零值 Peak
     #[inline]
     pub const fn zero() -> Self {
-        Self { min: 0.0, max: 0.0, rms: 0.0 }
+        Self {
+            min: 0.0,
+            max: 0.0,
+            rms: 0.0,
+        }
     }
 }
 
@@ -73,9 +77,6 @@ impl WaveformSummary {
 
     /// 第一个声道的层数(所有声道层数相同)
     pub fn level_count(&self) -> usize {
-        self.channels
-            .first()
-            .map(|c| c.level_count())
-            .unwrap_or(0)
+        self.channels.first().map(|c| c.level_count()).unwrap_or(0)
     }
 }

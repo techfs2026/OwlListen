@@ -1,7 +1,7 @@
 mod audio;
+mod audiobook;
 mod commands;
 mod waveform;
-mod audiobook;
 
 use commands::AppState;
 

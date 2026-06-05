@@ -269,12 +269,7 @@ impl PlaybackEngine {
         });
 
         // ── cpal stream ───────────────────────────────────────────────────────
-        let stream = build_stream(
-            &device,
-            &stream_config,
-            output_channels,
-            shared.clone(),
-        )?;
+        let stream = build_stream(&device, &stream_config, output_channels, shared.clone())?;
         stream.pause().ok();
 
         // ── decode 线程 ───────────────────────────────────────────────────────
