@@ -17,7 +17,7 @@ export interface DiffResult {
 export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
-    .replace(/[.,!?;:'"()[\]{}—…\-]/g, " ")
+    .replace(/[.,!?;:'"()[\]{}—…-]/g, " ")
     .split(/\s+/)
     .filter(Boolean);
 }

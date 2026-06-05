@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::ipc::Response;
 use tauri::State;
 
 use crate::audio::decode_audio;

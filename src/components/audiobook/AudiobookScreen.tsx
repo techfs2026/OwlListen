@@ -23,8 +23,10 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
   const {
     meta, playState,
     currentChapter, currentChapterIndex, currentTime, speed,
-    recentBooks, openBook, play, pause, seekInChapter,
+    recentBooks, autoAdvance, error,
+    openBook, play, pause, seekInChapter,
     goToChapter, nextChapter, prevChapter, setSpeed,
+    setAutoAdvance, clearError,
   } = useAudiobook();
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -174,6 +176,13 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
         </button>
       </div>
 
+      {error && (
+        <div className="audiobook__error" role="alert">
+          <span className="audiobook__error-msg">{error}</span>
+          <button className="audiobook__error-close" onClick={clearError} aria-label="关闭提示">✕</button>
+        </div>
+      )}
+
       <div className="audiobook__body">
         {meta ? (
           <>
@@ -221,12 +230,14 @@ export function AudiobookScreen({ onBack }: AudiobookScreenProps) {
         totalChapters={meta?.chapters.length ?? 0}
         currentTime={currentTime}
         speed={speed}
+        autoAdvance={autoAdvance}
         onPlay={play}
         onPause={pause}
         onPrev={prevChapter}
         onNext={nextChapter}
         onSeek={seekInChapter}
         onSpeedChange={setSpeed}
+        onToggleAutoAdvance={() => setAutoAdvance(!autoAdvance)}
       />
 
       {showHelp && <ShortcutModal onClose={() => setShowHelp(false)} />}

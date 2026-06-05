@@ -34,6 +34,8 @@ export interface UseAudiobookReturn {
   currentTime: number;
   speed: Speed;
   recentBooks: RecentBook[];
+  autoAdvance: boolean;
+  error: string | null;
   openBook: (path: string) => Promise<void>;
   play: () => void;
   pause: () => void;
@@ -42,6 +44,8 @@ export interface UseAudiobookReturn {
   nextChapter: () => void;
   prevChapter: () => void;
   setSpeed: (s: Speed) => void;
+  setAutoAdvance: (v: boolean) => void;
+  clearError: () => void;
 }
 
 export function useAudiobook(): UseAudiobookReturn {
@@ -52,6 +56,10 @@ export function useAudiobook(): UseAudiobookReturn {
   const [currentTime, setCurrentTime] = useState(0);
   const [speed, setSpeedState] = useState<Speed>(1);
   const [recentBooks, setRecentBooks] = useState<RecentBook[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [autoAdvance, setAutoAdvanceState] = useState<boolean>(
+    () => localStorage.getItem("audiobook.autoAdvance") !== "false"
+  );
 
   const currentTimeRef = useRef(0);
   const speedRef = useRef<Speed>(1);
@@ -60,6 +68,8 @@ export function useAudiobook(): UseAudiobookReturn {
   const lastSavedAtRef = useRef(0);
   const metaRef = useRef<AudiobookMeta | null>(null);
   useEffect(() => { metaRef.current = meta; }, [meta]);
+  const autoAdvanceRef = useRef(autoAdvance);
+  useEffect(() => { autoAdvanceRef.current = autoAdvance; }, [autoAdvance]);
 
   // 监听后端进度推送
   useEffect(() => {
@@ -89,10 +99,41 @@ export function useAudiobook(): UseAudiobookReturn {
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
-    listen<{ chapterIndex: number }>("playback-chapter-ended", (event) => {
-      console.log(`[audiobook] chapter ${event.payload.chapterIndex} ended`);
-      // 主动暂停后端，停止音频时钟空转
+    listen<{ chapterIndex: number }>("playback-chapter-ended", () => {
+      const meta = metaRef.current;
+      const cur = chapterIndexRef.current;
+      const hasNext = !!meta && cur < meta.chapters.length - 1;
+
+      // 自动续播开关开 且 还有下一章：直接跳下一章继续放（cpal 流仍在播，
+      // seek 会让解码线程从下一章重填环，无需重新 play）。
+      if (autoAdvanceRef.current && hasNext) {
+        const next = cur + 1;
+        chapterIndexRef.current = next;
+        currentTimeRef.current = 0;
+        setCurrentChapterIndex(next);
+        setCurrentTime(0);
+        setPlayState("playing");
+        playbackSeek(next, 0)
+          .then(() => {
+            if (speedRef.current !== 1) return playbackSetSpeed(speedRef.current);
+          })
+          .catch((e) => console.error("[audiobook] auto-advance:", e));
+        return;
+      }
+
+      // 否则（关了续播，或已是最后一章）：停在章末，暂停后端避免空转
       playbackPause().catch(() => { });
+      setPlayState("paused");
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  // 后端解码出错 → 提示用户（否则只会静默冻住）
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    listen<{ message: string }>("playback-error", (event) => {
+      console.error("[audiobook] playback error:", event.payload.message);
+      setError("播放出错，音频可能已损坏。请重新打开或换一本。");
       setPlayState("paused");
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
@@ -100,6 +141,7 @@ export function useAudiobook(): UseAudiobookReturn {
 
   const openBook = useCallback(async (path: string) => {
     setPlayState("loading");
+    setError(null);
     setCurrentTime(0);
     setCurrentChapterIndex(0);
     setMeta(null);
@@ -137,6 +179,7 @@ export function useAudiobook(): UseAudiobookReturn {
       setPlayState("ready");
     } catch (err) {
       console.error("[audiobook] open failed:", err);
+      setError("无法打开有声书，文件可能已损坏或被移动。");
       setPlayState("idle");
     }
   }, []);
@@ -226,10 +269,17 @@ export function useAudiobook(): UseAudiobookReturn {
   }, []);
 
   const setSpeed = useCallback((s: Speed) => {
-    speedRef.current = s; 
+    speedRef.current = s;
     setSpeedState(s);
     playbackSetSpeed(s).catch((e) => console.error("[audiobook] setSpeed:", e));
   }, []);
+
+  const setAutoAdvance = useCallback((v: boolean) => {
+    setAutoAdvanceState(v);
+    localStorage.setItem("audiobook.autoAdvance", String(v));
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
 
   // 卸载时关闭引擎
   useEffect(() => {
@@ -241,8 +291,9 @@ export function useAudiobook(): UseAudiobookReturn {
   return {
     meta, bookPath, playState,
     currentChapter, currentChapterIndex, currentTime, speed,
-    recentBooks,
+    recentBooks, autoAdvance, error,
     openBook, play, pause, seekInChapter,
     goToChapter, nextChapter, prevChapter, setSpeed,
+    setAutoAdvance, clearError,
   };
 }

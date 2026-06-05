@@ -12,12 +12,14 @@ interface PlayerBarProps {
   totalChapters: number;
   currentTime: number;
   speed: Speed;
+  autoAdvance: boolean;
   onPlay: () => void;
   onPause: () => void;
   onPrev: () => void;
   onNext: () => void;
   onSeek: (sec: number) => void;
   onSpeedChange: (s: Speed) => void;
+  onToggleAutoAdvance: () => void;
 }
 
 function fmtTime(sec: number): string {
@@ -30,8 +32,8 @@ function fmtTime(sec: number): string {
 
 export function PlayerBar({
   playState, currentChapter, currentChapterIndex, totalChapters,
-  currentTime, speed,
-  onPlay, onPause, onPrev, onNext, onSeek, onSpeedChange,
+  currentTime, speed, autoAdvance,
+  onPlay, onPause, onPrev, onNext, onSeek, onSpeedChange, onToggleAutoAdvance,
 }: PlayerBarProps) {
   const isPlaying = playState === "playing";
   const isReady = playState === "ready" || playState === "playing" || playState === "paused";
@@ -123,7 +125,16 @@ export function PlayerBar({
       </div>
 
       <div className="player-bar__controls">
-        <div className="player-bar__zone" />
+        <div className="player-bar__zone player-bar__zone--left">
+          <button
+            className={`player-bar__autoplay${autoAdvance ? " player-bar__autoplay--active" : ""}`}
+            onClick={onToggleAutoAdvance}
+            title={autoAdvance ? "自动续播下一章：开" : "自动续播下一章：关"}
+          >
+            <span className="player-bar__autoplay-dot" />
+            连播
+          </button>
+        </div>
 
         <div className="player-bar__zone player-bar__zone--center">
           <button

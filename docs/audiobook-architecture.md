@@ -4,6 +4,7 @@
 > 阅读顺序：先建立心智模型（三个世界 / 三线程），再看生命周期，最后看四个难题与前端协作。
 >
 > ⚠️ **维护约定**：当有声书的架构发生改动（线程模型、缓冲/seek 机制、变速、进度换算、前后端事件契约等），请同步更新本文，避免文档与代码漂移。
+> 本文**只引用文件名与函数/符号名，不标行号**（行号易过时）。
 
 涉及文件：
 
@@ -40,7 +41,7 @@ graph LR
   E -- "emit 进度事件" --> H
 ```
 
-**关键认知**：前端**从不直接碰音频**。它只做两件事——通过 `invoke` 下命令（打开 / 播放 / seek / 变速），通过 `listen` 收后端推来的进度事件。真正的音频在 Rust 引擎里，引擎实例存在 `AppState.playback: Mutex<Option<PlaybackEngine>>`，命令线程只是把调用转给它（每个命令约 3 行，见 `commands.rs:794-832`）。
+**关键认知**：前端**从不直接碰音频**。它只做两件事——通过 `invoke` 下命令（打开 / 播放 / seek / 变速），通过 `listen` 收后端推来的进度事件。真正的音频在 Rust 引擎里，引擎实例存在 `AppState.playback: Mutex<Option<PlaybackEngine>>`，命令线程只是把调用转给它（每个命令约 3 行，见 `commands.rs`）。
 
 引擎内部又有**三个 Rust 线程**，这是全部复杂度的来源：
 
@@ -50,7 +51,7 @@ graph LR
 | **decode 解码** | 生产者：FFmpeg 解码 + atempo 变速，填缓冲 | 尽量填满就睡 | — |
 | **progress 进度** | 旁观者：算位置、发事件 | 每 100ms | — |
 
-它们之间靠一个 `Arc<Shared>`（`playback.rs:148`）通信，中间隔着一个 **8 秒的无锁环形缓冲**。所有难点都来自同一个矛盾：
+它们之间靠一个 `Arc<Shared>`（`playback.rs`）通信，中间隔着一个 **8 秒的无锁环形缓冲**。所有难点都来自同一个矛盾：
 
 > **用户随时会 seek / 变速 / 换章，而 cpal 回调在另一个时间维度上实时狂跑，两者要无锁、无爆音地协调。**
 
@@ -67,7 +68,7 @@ graph LR
 
 ## 1. 生命周期：打开一本书
 
-用户点「打开有声书」→ `AudiobookScreen.handleOpenBook` → `openBookWithCover` → hook 的 `openBook`（`useAudiobook.ts:101`）。
+用户点「打开有声书」→ `AudiobookScreen.handleOpenBook` → `openBookWithCover` → hook 的 `openBook`（`useAudiobook.ts`）。
 
 ```mermaid
 sequenceDiagram
@@ -101,7 +102,7 @@ sequenceDiagram
 
 ---
 
-## 2. 引擎启动：`PlaybackEngine::open`（playback.rs:207）
+## 2. 引擎启动：`PlaybackEngine::open`（playback.rs）
 
 从"静态元数据"跨进"实时音频"的门：
 
@@ -118,7 +119,7 @@ sequenceDiagram
 
 ## 3. 心脏：SpscRing 与生产-消费-背压
 
-### 3a. 无锁环形缓冲 SpscRing（playback.rs:76）
+### 3a. 无锁环形缓冲 SpscRing（playback.rs）
 
 单生产者（decode）、单消费者（cpal）的 lock-free 队列，存 `f32` 样本：
 
@@ -148,13 +149,13 @@ graph LR
 
 > **下游处理不过来 / 缓冲满了时，反向"顶住"上游，逼它慢下来或暂停，而不是无脑生产。**
 
-💧 倒水类比：杯子快满就停手，等别人喝掉再倒。这里 decode 发现 `ring.vacant() < capacity/64`（约 1/8 秒余量，`playback.rs:664`）就 `park_decoder` 睡觉，等 cpal 取走样本腾出空间再被唤醒。`park_decoder`（`playback.rs:957`）用 `Condvar` + 200ms 超时兜底。
+💧 倒水类比：杯子快满就停手，等别人喝掉再倒。这里 decode 发现 `ring.vacant() < capacity/64`（约 1/8 秒余量，`playback.rs`）就 `park_decoder` 睡觉，等 cpal 取走样本腾出空间再被唤醒。`park_decoder`（`playback.rs`）用 `Condvar` + 200ms 超时兜底。
 
 **为什么缓冲是 8 秒**：够大能扛住解码卡顿/调度抖动，保证**永不断流**；又不能太大，否则 seek 清空重填延迟高、占内存。8 秒是甜点。
 
 ### underrun 保护
 
-万一环空了（生产跟不上），cpal 不输出垃圾，而是把上一样本 `× 0.95` 衰减到静音（`playback.rs:498-506`），避免爆音——实时音频的标准防御。
+万一环空了（生产跟不上），cpal 不输出垃圾，而是把上一样本 `× 0.95` 衰减到静音（`playback.rs`），避免爆音——实时音频的标准防御。
 
 ### 一个漂亮的副作用
 
@@ -196,13 +197,13 @@ sequenceDiagram
 
 ### 难题② 🎚️ 变速不变调：atempo 滤镜
 
-0.75 倍速要变慢但**音调不变**。用 FFmpeg 内置 `atempo` 滤镜（phase-vocoder，频域上拉伸时间保持音高）。`AtempoFilter`（`playback.rs:769`）把它包成接在解码后的小流水线：
+0.75 倍速要变慢但**音调不变**。用 FFmpeg 内置 `atempo` 滤镜（phase-vocoder，频域上拉伸时间保持音高）。`AtempoFilter`（`playback.rs`）把它包成接在解码后的小流水线：
 
 ```
 解码出的 PCM → [atempo=0.75 变速] → [降混成单声道] → 推进环
 ```
 
-**关键约束**：atempo 速率**建滤镜时定死，中途改不了**。所以用户每次切档，都必须**推倒重建整条滤镜**（`playback.rs:628-635`）——这牵连到难题③。
+**关键约束**：atempo 速率**建滤镜时定死，中途改不了**。所以用户每次切档，都必须**推倒重建整条滤镜**（`playback.rs`）——这牵连到难题③。
 > 这条流水线还顺手**多声道降混成单声道**（人声朗读单声道足够，省一半数据，也让 cpal 那段"单声道复制到 N 声道"成立）。
 
 ### 难题③ 📐 变速下的进度换算：为什么变速要"原地 seek"
@@ -210,16 +211,16 @@ sequenceDiagram
 进度线程靠"cpal 取走了多少样本（`popped_total`）"反推秒数。但变速会破坏换算：0.5 倍速下 atempo 把 1 秒源音频拉成 2 秒输出样本。所以：
 
 ```
-源音频前进秒数 = 取走的输出秒数 × 速率      （playback.rs:1032）
+源音频前进秒数 = 取走的输出秒数 × 速率      （playback.rs）
 ```
 
 **真正的坑**：用户**播到一半切速率**。切前那段按旧速率累计 `popped`，切后按新速率——用同一个总数会在切换点**算错、进度跳变**。
 
-**解法很巧**：每次变速，**假装在当前位置做一次 seek**（`set_speed` 内部触发 `do_seek`，`playback.rs:370`）。这一下：① 把进度基准 origin 快照到当前秒、计数归零重算；② 顺便触发难题①的清环 + 难题②的重建滤镜。于是"切速率"被统一成"在当前位置用新速率重新开始"，换算永远只在单一速率段内做。**一个动作同时解决三件事**，是这段代码最优雅处。
+**解法很巧**：每次变速，**假装在当前位置做一次 seek**（`set_speed` 内部触发 `do_seek`，`playback.rs`）。这一下：① 把进度基准 origin 快照到当前秒、计数归零重算；② 顺便触发难题①的清环 + 难题②的重建滤镜。于是"切速率"被统一成"在当前位置用新速率重新开始"，换算永远只在单一速率段内做。**一个动作同时解决三件事**，是这段代码最优雅处。
 
 ### 难题④ 🏁 章节边界：让播放停在章末
 
-解码是连续的，FFmpeg 不知道"章"。解决：解码线程一边解码一边盯时间戳，**一旦这帧越过"当前章末"**（`playback.rs:688`）：
+解码是连续的，FFmpeg 不知道"章"。解决：解码线程一边解码一边盯时间戳，**一旦这帧越过"当前章末"**（`playback.rs`）：
 1. 把 atempo 内部残留 flush 出来（否则尾巴丢半帧）；
 2. 竖旗子 `chapter_decode_done = true`；
 3. 解码线程去睡（不越界解下一章）。
@@ -235,11 +236,17 @@ sequenceDiagram
   Note over PR: 每 100ms 检查
   PR->>SH: decode_done && 环已空 && 正在播?
   PR->>FE: emit "playback-chapter-ended"
-  FE->>FE: 主动 playbackPause()
+  alt 自动续播开 且 有下一章
+    FE->>SH: do_seek 到下一章(0s)，cpal 流仍在播 → 无缝续播
+  else 关了续播 / 已是最后一章
+    FE->>FE: 主动 playbackPause()
+  end
   Note over FE: 用户点"下一章"→ 又一次 do_seek，重置旗子、唤醒解码
 ```
 
 > 必须在"还没把这帧推进环"之前就停，否则会越界播进下一章、进度跳章、用户点下一章还会多跳一章。音频里"差一帧"是常见 bug 源。
+
+> **章末行为可配置**：后端始终"停在章末 + 发事件"，是否续播由**前端**决定。`useAudiobook` 收到 `playback-chapter-ended` 时，若「自动续播」开关开且有下一章，就 `do_seek` 到下一章继续放（cpal 流没停，体验接近无缝，章节交界有 ~100ms 自然停顿）；否则暂停。开关状态存 `localStorage`，默认开。把这层逻辑放前端，是为了不去动后端那套精密的章末机制。
 
 ---
 
@@ -251,17 +258,18 @@ sequenceDiagram
 
 原因：后端有个**信息真空期**——见 5.2。
 
-### 5.1 正常情况：两条事件流（`useAudiobook.ts:65 / :90`）
+### 5.1 正常情况：两条事件流（`useAudiobook.ts`）
 
 - **`playback-progress`**（每 100ms）：带 `chapterIndex / positionSec / playing`，前端收到刷新 UI。稳态下进度条丝滑前进全靠它。
-- **`playback-chapter-ended`**（章末一次）：前端收到后**主动调 `playbackPause()`** 让后端停下，避免 cpal 空转。
+- **`playback-chapter-ended`**（章末一次）：前端按「自动续播」开关决定——续播则 `do_seek` 到下一章，否则**主动调 `playbackPause()`** 让后端停下，避免 cpal 空转（详见难题④）。
+- **`playback-error`**（出错时）：解码线程异常退出会让播放静默冻住，后端在退出前 `emit` 此事件；前端收到后弹出错误提示条并暂停，避免用户面对"无响应"。
 
 ### 5.2 信息真空：为什么前端要"先斩后奏"（乐观更新）
 
 `goToChapter / nextChapter / prevChapter` 都**先改前端 state，再调后端 seek**。为什么不等事件？因为**那个事件可能永远不来**：
 
 - seek 会让后端 `write_gen += 1`，而 `read_gen` 只在 **cpal 回调真正跑时**才追上。
-- 若此刻是**暂停**状态点章节——cpal 停着、回调不跑、`read_gen` 永远追不上 → 进度线程一直卡在 `playback.rs:1022` 的 `continue`，**一个事件都不发**。
+- 若此刻是**暂停**状态点章节——cpal 停着、回调不跑、`read_gen` 永远追不上 → 进度线程一直卡在 `playback.rs` 的 `continue`，**一个事件都不发**。
 
 所以前端必须乐观更新，UI 立刻跳，等播放恢复后用后端真相对账覆盖。
 🔑 普遍模式：**高延迟/可能无响应的操作，前端先乐观反映意图，用后续权威数据流做最终一致。**
@@ -271,14 +279,14 @@ sequenceDiagram
 - **state** 给**渲染**用（一变就重渲染，进度条才动）。
 - **ref** 给**稳定回调**用（存最新值但不触发渲染）。
 
-两个 `listen` 的 `useEffect` 依赖是 `[]`（只注册一次），其回调若直接读 state 会拿到注册那刻的旧值（闭包陷阱）。读 `bookPathRef.current` 才是最新（`useAudiobook.ts:79`）。
+两个 `listen` 的 `useEffect` 依赖是 `[]`（只注册一次），其回调若直接读 state 会拿到注册那刻的旧值（闭包陷阱）。读 `bookPathRef.current` 才是最新（`useAudiobook.ts`）。
 🔑 口诀：**要让画面变 → state；要在"只创建一次的回调"里读最新值 → ref。**
 
 ### 5.4 进度保存：高频节流 + 状态切换强存
 
 不能每 100ms 写盘。两条腿：
-1. **节流保存**（`useAudiobook.ts:76`）：progress 事件里，只有"正在播 且 距上次超 5 秒（`SAVE_INTERVAL_MS`）"才落盘。
-2. **暂停时强制保存**（`:150`）：一暂停事件流就停，必须在离开播放态瞬间补一刀。
+1. **节流保存**（`useAudiobook.ts`）：progress 事件里，只有"正在播 且 距上次超 5 秒（`SAVE_INTERVAL_MS`）"才落盘。
+2. **暂停时强制保存**（`pause` 里）：一暂停事件流就停，必须在离开播放态瞬间补一刀。
 
 🔑 套路：**高频流上节流，关键状态转移点上强制刷新。**
 
@@ -299,10 +307,10 @@ sequenceDiagram
 
 ### 5.6 三个值得学的 UX 细节
 
-1. **延迟 200ms 显示加载弹窗**（`AudiobookScreen.tsx:124`）：缓存命中秒开时不闪弹窗；超过 200ms 才显示，提前加载完就 `clearTimeout`。
-2. **乐观删除 + 失败回滚**（`:66`）：删最近书立刻从本地 `localRecent` 移除（秒响应），后端失败再加回去并排序。与 seek（几乎不失败、不回滚）对比——**是否回滚取决于失败概率与后果**。
+1. **延迟 200ms 显示加载弹窗**（`AudiobookScreen.tsx`）：缓存命中秒开时不闪弹窗；超过 200ms 才显示，提前加载完就 `clearTimeout`。
+2. **乐观删除 + 失败回滚**（`handleRemoveRecent`）：删最近书立刻从本地 `localRecent` 移除（秒响应），后端失败再加回去并排序。与 seek（几乎不失败、不回滚）对比——**是否回滚取决于失败概率与后果**。
    > Screen 维护本地镜像 `localRecent`，用 effect 从 hook 同步；删到 0 也要覆盖，**别加 `length > 0` 守卫**。
-3. **seek 后重新 apply 速率**（`:170`）：防御性——后端 seek 重建管道理论上保留速率，前端仍幂等重申一次（`set_speed` 发现没变会直接返回）。
+3. **seek 后重新 apply 速率**（`goToChapter` 等的 `.then` 里）：防御性——后端 seek 重建管道理论上保留速率，前端仍幂等重申一次（`set_speed` 发现没变会直接返回）。
 
 ---
 

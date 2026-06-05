@@ -282,6 +282,7 @@ impl PlaybackEngine {
         let decode_shared = shared.clone();
         let decode_chapters = chapters_arc.clone();
         let decode_path = path.to_string();
+        let app_decode = app.clone();
         let decode_handle = thread::Builder::new()
             .name("audiobook-decode".into())
             .spawn(move || {
@@ -294,6 +295,11 @@ impl PlaybackEngine {
                     decode_shared,
                 ) {
                     log::error!("decode thread error: {e:?}");
+                    // 解码线程异常退出会让播放静默冻住，通知前端给用户提示
+                    let _ = app_decode.emit(
+                        "playback-error",
+                        serde_json::json!({ "message": format!("{e}") }),
+                    );
                 }
                 log::info!("decode thread function returned");
             })
