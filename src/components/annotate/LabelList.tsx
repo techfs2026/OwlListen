@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { Label } from "@/types/waveform";
 
 interface LabelListProps {
@@ -8,7 +8,6 @@ interface LabelListProps {
   overlappingIds: Set<string>;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
-  onJumpTo: (start: number, end: number) => void;
   onUpdateText: (id: string, text: string) => void;
 }
 
@@ -18,11 +17,29 @@ export function LabelList({
   overlappingIds,
   onSelect,
   onRemove,
-  onJumpTo,
   onUpdateText,
 }: LabelListProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const selectedCardRef = useRef<HTMLDivElement | null>(null);
+
+  // 选中卡片变化时（框选新增、←/→ 切换、点击定位都会改 selectedId），
+  // 横向滚动让选中卡片进入可见区——否则新卡片会被挤到最右侧看不到。
+  useEffect(() => {
+    const el = selectedCardRef.current;
+    const container = listRef.current;
+    if (!el || !container) return;
+    const elRect = el.getBoundingClientRect();
+    const cRect = container.getBoundingClientRect();
+    const PAD = 16;
+    if (elRect.left < cRect.left) {
+      container.scrollBy({ left: elRect.left - cRect.left - PAD, behavior: "smooth" });
+    } else if (elRect.right > cRect.right) {
+      container.scrollBy({ left: elRect.right - cRect.right + PAD, behavior: "smooth" });
+    }
+  }, [selectedId, labels.length]);
+
   return (
-    <div style={s.container}>
+    <div ref={listRef} style={s.container}>
       {labels.length === 0 ? (
         <div style={s.empty}>
           <span style={s.emptyIcon}>⋯</span>
@@ -36,10 +53,10 @@ export function LabelList({
               label={label}
               index={idx + 1}
               selected={label.id === selectedId}
+              cardRef={label.id === selectedId ? selectedCardRef : undefined}
               overlapping={overlappingIds.has(label.id)}
               onSelect={() => onSelect(label.id)}
               onRemove={() => onRemove(label.id)}
-              onJumpTo={() => onJumpTo(label.start, label.end)}
               onUpdateText={(text) => onUpdateText(label.id, text)}
             />
           ))}
@@ -63,10 +80,10 @@ interface LabelCardProps {
   label: Label;
   index: number;
   selected: boolean;
+  cardRef?: React.Ref<HTMLDivElement>;
   overlapping: boolean;
   onSelect: () => void;
   onRemove: () => void;
-  onJumpTo: () => void;
   onUpdateText: (text: string) => void;
 }
 
@@ -84,30 +101,66 @@ function LabelCard({
   label,
   index,
   selected,
+  cardRef,
   overlapping,
   onSelect,
   onRemove,
-  onJumpTo,
   onUpdateText,
 }: LabelCardProps) {
+  const [hovered, setHovered] = useState(false);
+  const [closeHover, setCloseHover] = useState(false);
+
   const cardStyle: React.CSSProperties = {
     ...s.card,
-    borderColor: overlapping ? "#FCA5A5" : selected ? "var(--color-brand)" : undefined,
+    borderColor: overlapping
+      ? "#FCA5A5"
+      : selected
+        ? "var(--color-brand)"
+        : hovered
+          ? "var(--color-border)"
+          : undefined,
     boxShadow: overlapping
       ? "0 0 0 2px #FEE2E2"
       : selected
-        ? `0 0 0 2px var(--color-brand-soft), 0 1px 3px rgba(26,39,68,0.08)`
-        : "0 1px 3px rgba(26,39,68,0.05)",
-    background: overlapping
-      ? "#FFF5F5"
-      : selected
-        ? "var(--color-brand-soft)"
-        : "var(--color-paper)",
+        ? `0 0 0 3px var(--color-brand-soft), 0 6px 16px rgba(26,39,68,0.12)`
+        : hovered
+          ? "0 8px 20px rgba(26,39,68,0.10)"
+          : "0 1px 3px rgba(26,39,68,0.05)",
+    background: overlapping ? "#FFF5F5" : "var(--color-paper)",
+    transform: selected ? "translateY(-2px)" : hovered ? "translateY(-2px)" : undefined,
   };
 
   return (
-    <div style={cardStyle} onClick={onSelect}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+    <div
+      ref={cardRef}
+      style={cardStyle}
+      onClick={onSelect}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* 选中态左侧强调条 */}
+      {selected && !overlapping && <div style={s.accentBar} />}
+
+      {/* 右上角删除叉号 */}
+      <button
+        style={{
+          ...s.closeBtn,
+          background: closeHover ? "var(--color-danger)" : "transparent",
+          color: closeHover ? "#fff" : "var(--color-ink-3)",
+        }}
+        onMouseEnter={() => setCloseHover(true)}
+        onMouseLeave={() => setCloseHover(false)}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        title="删除片段"
+        aria-label="删除片段"
+      >
+        ×
+      </button>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingRight: 28 }}>
         <div
           style={{
             ...s.cardNum,
@@ -116,15 +169,7 @@ function LabelCard({
         >
           #{index}
         </div>
-        <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
-          {overlapping && <div style={s.overlapBadge}>⚠ 重叠</div>}
-          {selected && !overlapping && (
-            <div style={s.selectedBadge}>
-              <span style={s.selectedDot} />
-              选中
-            </div>
-          )}
-        </div>
+        {overlapping && <div style={s.overlapBadge}>⚠ 重叠</div>}
       </div>
       <div style={s.cardTimes}>
         <span style={s.t}>{fmtTime(label.start)}</span>
@@ -145,26 +190,6 @@ function LabelCard({
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => onUpdateText(e.target.value)}
       />
-      <div style={s.cardActions}>
-        <button
-          style={s.actionBtn}
-          onClick={(e) => {
-            e.stopPropagation();
-            onJumpTo();
-          }}
-        >
-          定位
-        </button>
-        <button
-          style={{ ...s.actionBtn, ...s.dangerBtn }}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          删除
-        </button>
-      </div>
     </div>
   );
 }
@@ -213,6 +238,7 @@ const s: Record<string, React.CSSProperties> = {
   addText: { fontSize: 11, color: "var(--color-ink-3)", textAlign: "center", lineHeight: 1.5 },
 
   card: {
+    position: "relative",
     flexShrink: 0,
     alignSelf: "stretch",
     minWidth: 270,
@@ -223,25 +249,40 @@ const s: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 7,
     cursor: "pointer",
-    transition: "box-shadow 0.12s, border-color 0.12s, background 0.12s",
+    overflow: "hidden",
+    transition: "box-shadow 0.12s, border-color 0.12s, background 0.12s, transform 0.12s",
+  },
+  accentBar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    background: "var(--color-brand)",
+    borderTopLeftRadius: 10,
+    borderBottomLeftRadius: 10,
+  },
+  closeBtn: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "none",
+    borderRadius: 7,
+    padding: 0,
+    fontSize: 20,
+    lineHeight: 1,
+    cursor: "pointer",
+    transition: "background 0.12s, color 0.12s",
   },
   cardNum: {
     fontFamily: "var(--font-mono)",
     fontSize: 22,
     fontWeight: 500,
-  },
-  selectedBadge: {
-    display: "flex",
-    alignItems: "center",
-    gap: 4,
-    fontSize: 10,
-    fontFamily: "var(--font-mono)",
-    color: "var(--color-brand)",
-    background: "#DBEAFE",
-    border: `0.5px solid #5B7FEA55`,
-    borderRadius: 8,
-    padding: "2px 7px",
-    letterSpacing: "0.04em",
   },
   overlapBadge: {
     fontSize: 10,
@@ -253,13 +294,6 @@ const s: Record<string, React.CSSProperties> = {
     padding: "2px 7px",
     letterSpacing: "0.04em",
     fontWeight: 600,
-  },
-  selectedDot: {
-    width: 5,
-    height: 5,
-    borderRadius: "50%",
-    background: "var(--color-brand)",
-    display: "inline-block",
   },
   nudgeHint: {
     display: "flex",
@@ -301,22 +335,5 @@ const s: Record<string, React.CSSProperties> = {
     padding: "5px 8px",
     width: "100%",
     outline: "none",
-  },
-  cardActions: { display: "flex", gap: 5 },
-  actionBtn: {
-    flex: 1,
-    background: "transparent",
-    border: `0.5px solid var(--color-border-2)`,
-    borderRadius: 5,
-    color: "var(--color-ink-3)",
-    fontSize: 13,
-    fontWeight: 500,
-    padding: "5px 0",
-    cursor: "pointer",
-    fontFamily: "var(--font-sans)",
-  },
-  dangerBtn: {
-    borderColor: "#FCA5A5",
-    color: "var(--color-danger)",
   },
 };

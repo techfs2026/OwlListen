@@ -88,11 +88,8 @@ export function AnnotateToolbar({
           </span>
         )}
         {loadingState === "error" && <span style={s.error}>加载失败</span>}
-        {isReady && audioInfo && (
-          <>
-            <span style={s.meta}>{audioInfo.levelCount} 层金字塔</span>
-            {labelCount > 0 && <span style={s.badge}>{labelCount} 段</span>}
-          </>
+        {isReady && audioInfo && labelCount > 0 && (
+          <span style={s.badge}>{labelCount} 段</span>
         )}
 
         <div style={{ flex: 1 }} />

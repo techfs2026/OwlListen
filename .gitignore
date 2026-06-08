@@ -44,3 +44,5 @@ pnpm-debug.log*
 .claude/
 
 whisper-models/
+
+TODO.md

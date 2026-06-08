@@ -9,7 +9,7 @@ interface UseLabelsReturn {
   updateLabel: (id: string, patch: Partial<Omit<Label, "id">>) => void;
   clearLabels: () => void;
   saveToFile: (path: string) => Promise<void>;
-  loadFromFile: (path: string) => Promise<void>;
+  loadFromFile: (path: string) => Promise<Label[]>;
 }
 
 export function useLabels(): UseLabelsReturn {
@@ -53,6 +53,7 @@ export function useLabels(): UseLabelsReturn {
   const loadFromFile = useCallback(async (path: string) => {
     const loaded = await loadLabels(path);
     setLabels(loaded);
+    return loaded;
   }, []);
 
   return {

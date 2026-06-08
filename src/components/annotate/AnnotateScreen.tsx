@@ -57,6 +57,12 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   const audioPathRef = useRef<string>("");
   const containerRef = useRef<HTMLDivElement>(null);
+  // 跟踪最新 selectedId，供"播放头跟随选中"副作用比对而不把它放进依赖，
+  // 否则点击卡片改了 selectedId 会触发副作用、用陈旧 currentTime 把选中冲掉。
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   // 按起点排序的片段，供 ←/→ 片段间导航使用
   const sortedLabels = useMemo<Label[]>(
@@ -155,6 +161,15 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     }
   }, [currentTime, playState, viewRange, setViewRange]);
 
+  // 播放头进入某个片段时自动选中对应卡片；落在片段之间的空隙时清空选中。
+  // 仅依赖 currentTime（用 ref 比对 selectedId），保证只在播放头真正移动时同步。
+  useEffect(() => {
+    if (playState !== "playing") return;
+    const cur = labels.find((l) => currentTime >= l.start && currentTime <= l.end);
+    const nextId = cur ? cur.id : null;
+    if (nextId !== selectedIdRef.current) setSelectedId(nextId);
+  }, [currentTime, playState, labels]);
+
   // ── 文件操作 ──────────────────────────────────────────────────────────────
 
   // 按当前窗口宽度算出"适合的初始视图"：每秒约 FIT_PX_PER_SEC px。
@@ -195,12 +210,33 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       multiple: false,
       filters: [{ name: "Labels", extensions: ["txt"] }],
     });
-    if (typeof path === "string") await loadFromFile(path);
-  }, [loadFromFile]);
+    if (typeof path !== "string") return;
+    const loaded = await loadFromFile(path);
+    // 载入后定位到第一段：保持当前缩放级别，仅在其超出可见区时平移过去
+    if (loaded.length > 0) {
+      const first = [...loaded].sort((a, b) => a.start - b.start)[0];
+      const dur = viewRange.endSec - viewRange.startSec;
+      if (first.start < viewRange.startSec || first.end > viewRange.endSec) {
+        const segDur = first.end - first.start;
+        const newStart = Math.max(0, first.start - (dur - segDur) / 2);
+        setViewRange({ startSec: newStart, endSec: newStart + dur });
+      }
+      setSelectedId(first.id);
+      seek(first.start);
+    }
+  }, [loadFromFile, viewRange, setViewRange, seek]);
 
   // ── 波形交互 ──────────────────────────────────────────────────────────────
 
-  const handleSeek = useCallback((sec: number) => seek(sec), [seek]);
+  // 鼠标点击波形移动播放指针：seek 的同时同步选中对应片段的卡片（空隙处清空）。
+  const handleSeek = useCallback(
+    (sec: number) => {
+      seek(sec);
+      const cur = labels.find((l) => sec >= l.start && sec <= l.end);
+      setSelectedId(cur ? cur.id : null);
+    },
+    [seek, labels],
+  );
 
   const handleRegionSelected = useCallback(
     (start: number, end: number) => {
@@ -220,15 +256,6 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       else zoomOut(centerSec);
     },
     [zoomIn, zoomOut],
-  );
-
-  const handleJumpTo = useCallback(
-    (start: number, end: number) => {
-      const pad = (end - start) * 0.2;
-      setViewRange({ startSec: Math.max(0, start - pad), endSec: end + pad });
-      seek(start);
-    },
-    [setViewRange, seek],
   );
 
   // 选中片段并播放（回环则换 loop 区间，否则播一段自动停）。
@@ -535,9 +562,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         selectedId={selectedId}
         overlappingIds={overlappingIds}
         onSelect={(id) => {
-          // 点击卡片：仅选中并播放，不改动视图缩放（定位视图请用卡片上的「定位」按钮）
+          // 点击卡片：保持当前缩放级别不变，仅当片段超出可见区时平移过去，再选中并播放
           const label = labels.find((l) => l.id === id);
-          if (label) selectLabel(label, false);
+          if (label) selectLabel(label, true);
         }}
         onRemove={(id) => {
           const label = labels.find((l) => l.id === id);
@@ -548,7 +575,6 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
           removeLabel(id);
           if (selectedId === id) setSelectedId(null);
         }}
-        onJumpTo={handleJumpTo}
         onUpdateText={(id, text) => updateLabel(id, { text })}
       />
 
