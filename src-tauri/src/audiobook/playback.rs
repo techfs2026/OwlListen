@@ -52,7 +52,8 @@
 /// 注意：speed 改变时 origin 也要"快照"当前位置，否则进度会跳变。
 /// 实现：set_speed 触发一次 do_seek 到当前位置，等价于"在当前进度切换速率"。
 use anyhow::{anyhow, Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use audioplayer::{AtempoFilter, FillInfo, OutputSink, SampleSource};
+use cpal::traits::{DeviceTrait, HostTrait};
 use ffmpeg_next as ffmpeg;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -66,8 +67,6 @@ use super::chapters::Chapter;
 
 const RING_SECONDS: f32 = 8.0;
 const PROGRESS_TICK_MS: u64 = 100;
-/// 淡入步长：48kHz 下约 42ms 升满
-const FADE_STEPS: f32 = 2000.0;
 
 // ── SpscRing ─────────────────────────────────────────────────────────────────
 
@@ -192,13 +191,67 @@ impl Shared {
     }
 }
 
+/// 把流式 ring 适配成 OutputSink 的样本来源。
+/// 逻辑等价于原 build_stream 回调里 Shared 相关的那部分；
+/// 淡入/underrun/声道复制现在归 OutputSink 管。
+impl SampleSource for Shared {
+    fn fill(&self, out: &mut [f32]) -> FillInfo {
+        // gen 切换检测：seek/换源时清环、切 origin baseline，并要求 OutputSink 重置淡入。
+        let mut discontinuity = false;
+        let write_gen = self.write_gen.load(Ordering::Acquire);
+        if self.read_gen.load(Ordering::Relaxed) != write_gen {
+            self.ring.clear();
+
+            let new_baseline = self.pending_origin_baseline.load(Ordering::Acquire);
+            self.origin_baseline.store(new_baseline, Ordering::Release);
+
+            if let Ok(mut guard) = self.pending_origin_sec.try_lock() {
+                if let Some(sec) = guard.take() {
+                    if let Ok(mut orig) = self.origin_sec.try_lock() {
+                        *orig = sec;
+                    }
+                }
+            }
+
+            self.read_gen.store(write_gen, Ordering::Release);
+            discontinuity = true;
+            log::debug!("cpal: gen→{write_gen}");
+        }
+
+        // 从 ring 连续 pop：取到 None（underrun）即停，其余由 OutputSink 衰减静音。
+        let mut produced = 0usize;
+        for slot in out.iter_mut() {
+            match self.ring.try_pop() {
+                Some(v) => {
+                    *slot = v;
+                    produced += 1;
+                }
+                None => break,
+            }
+        }
+
+        let prev_total = self
+            .popped_total
+            .fetch_add(produced as u64, Ordering::Relaxed);
+        self.wake_decoder();
+
+        FillInfo {
+            produced,
+            discontinuity,
+            // 播放时钟坐标用累计消费数（有声书进度走 origin 换算、不读时钟，仅满足契约）
+            run_start_sample: prev_total,
+            run_offset: 0,
+        }
+    }
+}
+
 // ── PlaybackEngine ────────────────────────────────────────────────────────────
 
 pub struct PlaybackEngine {
     shared: Arc<Shared>,
     chapters: Arc<Vec<Chapter>>,
     output_sample_rate: u32,
-    _stream: cpal::Stream,
+    _sink: OutputSink,
     decode_handle: Option<JoinHandle<()>>,
     progress_handle: Option<JoinHandle<()>>,
 }
@@ -268,9 +321,11 @@ impl PlaybackEngine {
             decoder_speed_gen: AtomicU32::new(0),
         });
 
-        // ── cpal stream ───────────────────────────────────────────────────────
-        let stream = build_stream(&device, &stream_config, output_channels, shared.clone())?;
-        stream.pause().ok();
+        // ── cpal 输出层 ────────────────────────────────────────────────────────
+        // OutputSink 管设备输出流 + 淡入 + underrun + 声道复制；
+        // 样本由 Shared（ring 流式）通过 SampleSource 提供。
+        let sink = OutputSink::new(&device, &stream_config, shared.clone())?;
+        sink.pause().ok();
 
         // ── decode 线程 ───────────────────────────────────────────────────────
         let chapters_arc = Arc::new(chapters);
@@ -314,7 +369,7 @@ impl PlaybackEngine {
             shared,
             chapters: chapters_arc,
             output_sample_rate,
-            _stream: stream,
+            _sink: sink,
             decode_handle: Some(decode_handle),
             progress_handle: Some(progress_handle),
         })
@@ -322,7 +377,7 @@ impl PlaybackEngine {
 
     pub fn play(&self) -> Result<()> {
         log::info!("PlaybackEngine::play()");
-        self._stream.play().map_err(|e| anyhow!("cpal play: {e}"))?;
+        self._sink.play()?;
         self.shared.playing.store(true, Ordering::Release);
         self.shared.wake_decoder();
         Ok(())
@@ -330,9 +385,7 @@ impl PlaybackEngine {
 
     pub fn pause(&self) -> Result<()> {
         log::info!("PlaybackEngine::pause()");
-        self._stream
-            .pause()
-            .map_err(|e| anyhow!("cpal pause: {e}"))?;
+        self._sink.pause()?;
         self.shared.playing.store(false, Ordering::Release);
         Ok(())
     }
@@ -411,7 +464,7 @@ impl Drop for PlaybackEngine {
         self.shared.should_exit.store(true, Ordering::Release);
         self.shared.playing.store(false, Ordering::Release);
         self.shared.wake_decoder();
-        let _ = self._stream.pause();
+        let _ = self._sink.pause();
         if let Some(h) = self.decode_handle.take() {
             let _ = h.join();
         }
@@ -422,7 +475,8 @@ impl Drop for PlaybackEngine {
     }
 }
 
-// ── cpal callback ─────────────────────────────────────────────────────────────
+// ── 探测采样率 ────────────────────────────────────────────────────────────────
+// cpal 输出层已抽到 audioplayer::OutputSink；这里只保留有声书特有的采样率探测。
 
 /// 读取音频流的采样率（用于把 cpal 输出流配置成源采样率，省去应用层重采样）。
 fn probe_audio_rate(path: &str) -> Result<u32> {
@@ -436,99 +490,6 @@ fn probe_audio_rate(path: &str) -> Result<u32> {
         .audio()?;
     let rate = if dec.rate() > 0 { dec.rate() } else { 48000 };
     Ok(rate)
-}
-
-fn build_stream(
-    device: &cpal::Device,
-    config: &cpal::StreamConfig,
-    out_channels: u16,
-    shared: Arc<Shared>,
-) -> Result<cpal::Stream> {
-    let channels = out_channels as usize;
-
-    // 闭包内的状态：淡入乘数和上一帧（用于 underrun 衰减）
-    let mut fade_mult = 0.0f32;
-    let mut prev_sample = 0.0f32;
-
-    let stream = device
-        .build_output_stream(
-            config,
-            move |out: &mut [f32], _info: &cpal::OutputCallbackInfo| {
-                let frames = out.len() / channels;
-
-                static CB_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                let cnt = CB_N.fetch_add(1, Ordering::Relaxed);
-
-                // ── gen 切换检测 ─────────────────────────────────────────────
-                let write_gen = shared.write_gen.load(Ordering::Acquire);
-                if shared.read_gen.load(Ordering::Relaxed) != write_gen {
-                    shared.ring.clear();
-
-                    let new_baseline = shared.pending_origin_baseline.load(Ordering::Acquire);
-                    shared
-                        .origin_baseline
-                        .store(new_baseline, Ordering::Release);
-
-                    if let Ok(mut guard) = shared.pending_origin_sec.try_lock() {
-                        if let Some(sec) = guard.take() {
-                            if let Ok(mut orig) = shared.origin_sec.try_lock() {
-                                *orig = sec;
-                            }
-                        }
-                    }
-
-                    shared.read_gen.store(write_gen, Ordering::Release);
-                    fade_mult = 0.0;
-                    prev_sample = 0.0;
-
-                    log::debug!("cpal: gen→{write_gen}");
-                }
-
-                // ── 逐帧填充（cpal 是 interleaved）──────────────────────────
-                let mut popped = 0u64;
-
-                for fi in 0..frames {
-                    let s = if let Some(val) = shared.ring.try_pop() {
-                        if fade_mult < 1.0 {
-                            fade_mult = (fade_mult + 1.0 / FADE_STEPS).min(1.0);
-                        }
-                        let out_val = val * fade_mult;
-                        prev_sample = out_val;
-                        popped += 1;
-                        out_val
-                    } else {
-                        // underrun：衰减到静音 + 重置淡入
-                        fade_mult = 0.0;
-                        prev_sample *= 0.95;
-                        if prev_sample.abs() < 1e-5 {
-                            prev_sample = 0.0;
-                        }
-                        prev_sample
-                    };
-
-                    // 复制到所有声道（mono → N声道）
-                    for ch in 0..channels {
-                        out[fi * channels + ch] = s;
-                    }
-                }
-
-                if cnt % 100 == 0 {
-                    log::debug!(
-                        "cpal #{cnt} popped_in_cb={popped} ring.occupied={} popped_total={}",
-                        shared.ring.occupied(),
-                        shared.popped_total.load(Ordering::Relaxed),
-                    );
-                }
-
-                shared.popped_total.fetch_add(popped, Ordering::Relaxed);
-                shared.wake_decoder();
-            },
-            |err| log::error!("cpal stream error: {err}"),
-            None,
-        )
-        .context("build_output_stream")?;
-
-    Ok(stream)
 }
 
 // ── decode 线程 ───────────────────────────────────────────────────────────────
@@ -757,123 +718,6 @@ fn decode_loop(
 
     log::info!("decode thread exited main loop");
     Ok(())
-}
-
-// ── AtempoFilter：FFmpeg filter graph 包装 ───────────────────────────────────
-
-/// 封装 atempo filter graph：变速不变调
-/// 输入：解码器输出的 PCM 帧（任意采样率/布局/格式）
-/// 输出：变速后的 PCM 帧（同采样率，可能不同样本数）
-///
-/// rate=1.0 时 atempo 仍然存在，但近似透明（轻微的 phase vocoder 处理开销）。
-/// 为了 1.0 时绝对零开销，可以加一个 bypass 分支，但当前实现简单一致。
-struct AtempoFilter {
-    graph: ffmpeg::filter::Graph,
-}
-
-impl AtempoFilter {
-    fn new(
-        src_format: ffmpeg::format::Sample,
-        src_layout: ffmpeg::channel_layout::ChannelLayout,
-        src_rate: u32,
-        speed: f32,
-    ) -> Result<Self> {
-        // atempo 单段 0.5~100，我们的 [0.5, 1.75] 完全覆盖，不需要级联
-        let speed = speed.clamp(0.5, 100.0);
-
-        let mut graph = ffmpeg::filter::Graph::new();
-
-        let in_args = format!(
-            "time_base=1/{rate}:sample_rate={rate}:sample_fmt={fmt}:channel_layout=0x{layout:x}",
-            rate = src_rate,
-            fmt = sample_fmt_name(src_format),
-            layout = src_layout.bits(),
-        );
-
-        graph
-            .add(
-                &ffmpeg::filter::find("abuffer").ok_or_else(|| anyhow!("abuffer not found"))?,
-                "in",
-                &in_args,
-            )
-            .with_context(|| format!("add abuffer: {in_args}"))?;
-
-        graph
-            .add(
-                &ffmpeg::filter::find("abuffersink")
-                    .ok_or_else(|| anyhow!("abuffersink not found"))?,
-                "out",
-                "",
-            )
-            .context("add abuffersink")?;
-
-        // 拼接：in → atempo=rate=X → 降混为单声道 fltp（采样率不变）→ out
-        // aformat 里把 channel_layouts 定为 mono，让滤镜图自动插入降混，
-        // 这样输出帧就是 mono/fltp/源采样率，可直接送入 cpal，无需重采样。
-        let spec = format!(
-            "[in]atempo={speed},aformat=sample_fmts=fltp:sample_rates={rate}:channel_layouts=0x{mono:x}[out]",
-            speed = speed,
-            rate = src_rate,
-            mono = ffmpeg::channel_layout::ChannelLayout::MONO.bits(),
-        );
-        graph.output("in", 0)?.input("out", 0)?.parse(&spec)?;
-        graph.validate().context("filter graph validate")?;
-
-        Ok(Self { graph })
-    }
-
-    fn send(&mut self, frame: &ffmpeg::frame::Audio) -> Result<()> {
-        self.graph
-            .get("in")
-            .ok_or_else(|| anyhow!("in not found"))?
-            .source()
-            .add(frame)
-            .map_err(|e| anyhow!("atempo add: {e}"))
-    }
-
-    fn send_eof(&mut self) -> Result<()> {
-        // 通过给 source filter 发空帧（None）触发 EOF flush
-        self.graph
-            .get("in")
-            .ok_or_else(|| anyhow!("in not found"))?
-            .source()
-            .flush()
-            .map_err(|e| anyhow!("atempo flush: {e}"))
-    }
-
-    /// 返回 true 表示成功取到一帧，false 表示需要更多输入（EAGAIN）
-    fn receive(&mut self, frame: &mut ffmpeg::frame::Audio) -> Result<bool> {
-        match self
-            .graph
-            .get("out")
-            .ok_or_else(|| anyhow!("out not found"))?
-            .sink()
-            .frame(frame)
-        {
-            Ok(_) => Ok(true),
-            Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::error::EAGAIN => Ok(false),
-            Err(ffmpeg::Error::Eof) => Ok(false),
-            Err(e) => Err(anyhow!("atempo receive: {e}")),
-        }
-    }
-}
-
-fn sample_fmt_name(fmt: ffmpeg::format::Sample) -> &'static str {
-    use ffmpeg::format::sample::Type;
-    use ffmpeg::format::Sample;
-    match fmt {
-        Sample::U8(Type::Packed) => "u8",
-        Sample::U8(Type::Planar) => "u8p",
-        Sample::I16(Type::Packed) => "s16",
-        Sample::I16(Type::Planar) => "s16p",
-        Sample::I32(Type::Packed) => "s32",
-        Sample::I32(Type::Planar) => "s32p",
-        Sample::F32(Type::Packed) => "flt",
-        Sample::F32(Type::Planar) => "fltp",
-        Sample::F64(Type::Packed) => "dbl",
-        Sample::F64(Type::Planar) => "dblp",
-        _ => "fltp",
-    }
 }
 
 // ── 辅助 ──────────────────────────────────────────────────────────────────────

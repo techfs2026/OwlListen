@@ -23,6 +23,8 @@ pub struct AppState {
     pub whisper_ctx: Mutex<Option<(String, whisper_rs::WhisperContext)>>,
     /// 有声书播放引擎（最多一个活跃）
     pub playback: Mutex<Option<crate::audiobook::PlaybackEngine>>,
+    /// 精听播放引擎（内存 buffer 路径，最多一个活跃）
+    pub practice: Mutex<Option<crate::practice::PracticePlayer>>,
 }
 
 impl AppState {
@@ -32,6 +34,7 @@ impl AppState {
             audio_path: Mutex::new(None),
             whisper_ctx: Mutex::new(None),
             playback: Mutex::new(None),
+            practice: Mutex::new(None),
         }
     }
 }
@@ -822,4 +825,82 @@ pub fn playback_set_speed(state: State<AppState>, speed: f32) -> Result<(), Stri
     let guard = state.playback.lock().unwrap();
     let engine = guard.as_ref().ok_or("no playback engine")?;
     engine.set_speed(speed).map_err(|e| e.to_string())
+}
+
+// ── 精听播放（内存 buffer 路径）─────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn practice_open(app: AppHandle, state: State<AppState>, path: String) -> Result<f64, String> {
+    use crate::practice::PracticePlayer;
+
+    let engine = PracticePlayer::open(&path, app).map_err(|e| e.to_string())?;
+    let duration = engine.duration_secs();
+
+    let mut guard = state.practice.lock().unwrap();
+    *guard = Some(engine); // 旧的自动 drop
+    Ok(duration)
+}
+
+#[tauri::command]
+pub fn practice_play(state: State<AppState>) -> Result<(), String> {
+    let guard = state.practice.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no practice engine")?;
+    engine.play().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn practice_pause(state: State<AppState>) -> Result<(), String> {
+    let guard = state.practice.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no practice engine")?;
+    engine.pause().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn practice_seek(state: State<AppState>, position_sec: f64) -> Result<(), String> {
+    let guard = state.practice.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no practice engine")?;
+    engine.seek(position_sec).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn practice_play_segment(
+    state: State<AppState>,
+    start_sec: f64,
+    end_sec: f64,
+) -> Result<(), String> {
+    let guard = state.practice.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no practice engine")?;
+    engine
+        .play_segment(start_sec, end_sec)
+        .map_err(|e| e.to_string())
+}
+
+/// 设置/清除 AB 循环：start_sec/end_sec 同时为 Some 时设置，否则清除。
+#[tauri::command]
+pub fn practice_set_loop(
+    state: State<AppState>,
+    start_sec: Option<f64>,
+    end_sec: Option<f64>,
+) -> Result<(), String> {
+    let guard = state.practice.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no practice engine")?;
+    let range = match (start_sec, end_sec) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    };
+    engine.set_loop(range).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn practice_set_speed(state: State<AppState>, speed: f32) -> Result<(), String> {
+    let guard = state.practice.lock().unwrap();
+    let engine = guard.as_ref().ok_or("no practice engine")?;
+    engine.set_speed(speed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn practice_close(state: State<AppState>) -> Result<(), String> {
+    let mut guard = state.practice.lock().unwrap();
+    *guard = None;
+    Ok(())
 }

@@ -4,11 +4,12 @@ import { AnnotateToolbar } from "./AnnotateToolbar";
 import { WaveformCanvas } from "./WaveformCanvas";
 import { TimeAxis } from "./TimeAxis";
 import { LabelList } from "./LabelList";
+import { PracticePlayerBar } from "./PracticePlayerBar";
 import { ExportPanel, type ExportProgress } from "./ExportPanel";
 import { ShortcutModal } from "./ShortcutModal";
 import { useWaveform } from "@/hooks/useWaveform";
 import { useLabels } from "@/hooks/useLabels";
-import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { usePracticePlayer } from "@/hooks/usePracticePlayer";
 import { splitAudio, transcribeSegments, buildZip, getTempDir } from "@/utils/tauriApi";
 import type { Label, RenderData } from "@/types/waveform";
 
@@ -39,7 +40,10 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
   const {
     playState,
     currentTime,
+    playheadWallMs,
+    duration,
     loopRange,
+    speed,
     load: loadAudio,
     play,
     playSegment,
@@ -47,7 +51,8 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
     seek,
     unload: unloadAudio,
     setLoop,
-  } = useAudioPlayer();
+    setSpeed,
+  } = usePracticePlayer();
 
   const [renderData, setRenderData] = useState<RenderData | null>(null);
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
@@ -134,6 +139,11 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
       }
     };
   }, []);
+
+  // 离开界面时关闭 Rust 播放引擎，避免返回后音频还在后台播放
+  useEffect(() => {
+    return () => unloadAudio();
+  }, [unloadAudio]);
 
   useEffect(() => {
     refreshPeaks();
@@ -390,6 +400,22 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
 
   const isPlaying = playState === "playing";
 
+  // 切换 AB 回环：无回环时取当前时间所在/最后一个片段开始回环；有回环则清除。
+  const handleToggleLoop = useCallback(() => {
+    if (loopRange) {
+      setLoop(null);
+      return;
+    }
+    const target =
+      labels.find((lb) => currentTime >= lb.start && currentTime <= lb.end) ??
+      labels[labels.length - 1];
+    if (target) {
+      setLoop([target.start, target.end]);
+      seek(target.start);
+      play(target.start);
+    }
+  }, [loopRange, labels, currentTime, setLoop, seek, play]);
+
   // ── 键盘快捷键 ────────────────────────────────────────────────────────────
   //
   // 空格    播放/暂停
@@ -491,9 +517,6 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
         audioInfo={audioInfo}
         loadingState={loadingState}
         labelCount={labels.length}
-        currentTime={currentTime}
-        playing={isPlaying}
-        looping={loopRange !== null}
         onBack={onBack}
         onShowHelp={() => setShowHelp(true)}
         onOpenAudio={handleOpenAudio}
@@ -503,24 +526,13 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
           setLoop(null);
           clearLabels();
         }}
-        onPlay={() => play()}
-        onPause={pause}
         onExport={handleExport}
-        onToggleLoop={() => {
-          if (loopRange) setLoop(null);
-          else {
-            // 找当前时间所在 label
-            const target =
-              labels.find((lb) => currentTime >= lb.start && currentTime <= lb.end) ??
-              labels[labels.length - 1];
-            if (target) {
-              setLoop([target.start, target.end]);
-              seek(target.start);
-              play(target.start);
-            }
-          }
-        }}
       />
+
+      {/* 顶部时间轴 */}
+      {loadingState === "ready" && (
+        <TimeAxis viewRange={viewRange} width={containerWidth} placement="top" />
+      )}
 
       {/* 波形区 */}
       <div ref={containerRef} style={s.waveArea}>
@@ -538,6 +550,9 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
             viewRange={viewRange}
             duration={audioInfo?.duration ?? 0}
             playhead={currentTime}
+            playheadWallMs={playheadWallMs}
+            playing={isPlaying}
+            speed={speed}
             colors={{ playhead: "#16A34A" }}
             labels={labels}
             selectedId={selectedId}
@@ -576,6 +591,21 @@ export function AnnotateScreen({ onBack }: AnnotateScreenProps) {
           if (selectedId === id) setSelectedId(null);
         }}
         onUpdateText={(id, text) => updateLabel(id, { text })}
+      />
+
+      {/* 底部播放栏：播放 / 回环 / 变速，进度与波形同步 */}
+      <PracticePlayerBar
+        ready={loadingState === "ready"}
+        playing={isPlaying}
+        looping={loopRange !== null}
+        currentTime={currentTime}
+        duration={duration || audioInfo?.duration || 0}
+        speed={speed}
+        onPlay={() => play()}
+        onPause={pause}
+        onToggleLoop={handleToggleLoop}
+        onSetSpeed={setSpeed}
+        onSeek={seek}
       />
 
       {/* 导出进度 */}

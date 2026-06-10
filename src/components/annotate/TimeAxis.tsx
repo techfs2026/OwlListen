@@ -3,6 +3,8 @@ import { useMemo } from "react";
 interface TimeAxisProps {
   viewRange: { startSec: number; endSec: number };
   width: number; // container px width (used to choose tick density)
+  /** 放在波形上方还是下方：上方时刻度朝下、标签在上、分隔线在底部 */
+  placement?: "top" | "bottom";
 }
 
 function formatTime(sec: number): string {
@@ -22,9 +24,10 @@ function chooseTick(dur: number): number {
   );
 }
 
-export function TimeAxis({ viewRange, width }: TimeAxisProps) {
+export function TimeAxis({ viewRange, width, placement = "bottom" }: TimeAxisProps) {
   const { startSec, endSec } = viewRange;
   const dur = endSec - startSec;
+  const isTop = placement === "top";
 
   const ticks = useMemo(() => {
     if (dur <= 0 || width <= 0) return [];
@@ -42,7 +45,9 @@ export function TimeAxis({ viewRange, width }: TimeAxisProps) {
       style={{
         position: "relative",
         height: 24,
-        borderTop: `0.5px solid var(--color-border)`,
+        ...(isTop
+          ? { borderBottom: `0.5px solid var(--color-border)` }
+          : { borderTop: `0.5px solid var(--color-border)` }),
         background: "var(--color-paper)",
         flexShrink: 0,
       }}
@@ -56,9 +61,9 @@ export function TimeAxis({ viewRange, width }: TimeAxisProps) {
             style={{
               position: "absolute",
               left: `${pct}%`,
-              top: 0,
+              [isTop ? "bottom" : "top"]: 0,
               display: "flex",
-              flexDirection: "column",
+              flexDirection: isTop ? "column-reverse" : "column",
               alignItems: "center",
               transform: "translateX(-50%)",
             }}
@@ -69,7 +74,7 @@ export function TimeAxis({ viewRange, width }: TimeAxisProps) {
                 fontFamily: "var(--font-mono)",
                 fontSize: 9,
                 color: "var(--color-ink-3)",
-                marginTop: 2,
+                [isTop ? "marginBottom" : "marginTop"]: 2,
                 whiteSpace: "nowrap",
                 userSelect: "none",
               }}

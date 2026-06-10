@@ -3,6 +3,10 @@ name = "owllisten"
 version = "0.1.0"
 edition = "2021"
 
+# src-tauri 同时作为 workspace 根：target 目录保持在 src-tauri/target（打包脚本依赖此路径）。
+[workspace]
+members = ["crates/audioplayer"]
+
 [lib]
 name = "owllisten_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -12,6 +16,7 @@ name = "owllisten"
 path = "src/main.rs"
 
 [dependencies]
+audioplayer = { path = "crates/audioplayer" }
 tauri = { version = "2.0", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2.0"
 tauri-plugin-fs = "2.0"

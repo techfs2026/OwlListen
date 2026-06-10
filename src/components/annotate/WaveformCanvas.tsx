@@ -8,6 +8,15 @@ interface WaveformCanvasProps {
   viewRange: ViewRange;
   duration: number;
   playhead: number;
+  /**
+   * playhead 对应的墙钟时刻（performance.now 域，毫秒）。进度事件经时钟对齐扣除
+   * 传输延迟后给出，以此为锚点外推可消除事件滞后；缺省/≤0 时退回当下时刻。
+   */
+  playheadWallMs?: number;
+  /** 是否正在播放：决定播放头是否按速度逐帧平滑外推 */
+  playing?: boolean;
+  /** 当前播放速度，用于帧间外推播放头位置 */
+  speed?: number;
   labels: Label[];
   selectedId?: string | null;
   overlappingIds?: Set<string>;
@@ -36,6 +45,9 @@ export function WaveformCanvas({
   viewRange,
   duration,
   playhead,
+  playheadWallMs,
+  playing = false,
+  speed = 1,
   labels,
   selectedId = null,
   overlappingIds,
@@ -221,20 +233,27 @@ export function WaveformCanvas({
   );
 
   // ── 渲染 ──────────────────────────────────────────────────────────────────
+  //
+  // Rust 进度事件每 50ms 才来一次（20Hz），直接拿它画播放头会一格一格地跳、晃眼。
+  // 这里改为：以最近一次权威进度为锚点，播放中用 rAF 按速度在帧间平滑外推播放头
+  // 位置（仅驱动 WebGL 重绘，不触发 React 重渲染）；新进度到达时重新锚定。
+  //
+  // 锚点的墙钟时刻用 playheadWallMs（事件经时钟对齐扣掉传输延迟后的真实发出时刻），
+  // 而非收到的当下，故 elapsed 自带那段延迟、外推不再滞后于真实进度。
 
-  useEffect(() => {
-    const playheadRatio = duration > 0 ? secToRatio(playhead) : -1;
+  // 每次渲染都重建绘制闭包，使其始终捕获最新的 data / labels / viewRange 等。
+  const drawRef = useRef<(playheadSec: number) => void>(() => {});
+  drawRef.current = (playheadSec: number) => {
+    const playheadRatio = duration > 0 ? secToRatio(playheadSec) : -1;
     const normalizedLabels = labels.map((l) => ({
       start: secToRatio(l.start),
       end: secToRatio(l.end),
       selected: l.id === selectedId,
       overlapping: overlappingIds?.has(l.id) ?? false,
     }));
-
     const normalizedLoop = loopRange
       ? ([secToRatio(loopRange[0]), secToRatio(loopRange[1])] as [number, number])
       : null;
-
     render({
       data,
       playhead: playheadRatio,
@@ -243,17 +262,60 @@ export function WaveformCanvas({
       colors,
       loopRange: normalizedLoop,
     });
+  };
+
+  // 锚点：每收到一次权威进度（playhead 变化）重新锚定，供帧间外推
+  const anchorSecRef = useRef(playhead);
+  const anchorWallRef = useRef(0);
+  // 是否已收到“播放中”的首个真实进度：未收到前冻结播放头，避免用启动延迟外推。
+  const startedRef = useRef(false);
+  useEffect(() => {
+    anchorSecRef.current = playhead;
+    // 锚点墙钟取「该位置真实对应的时刻」（已扣传输延迟），外推从此刻起算即不再滞后。
+    anchorWallRef.current =
+      playheadWallMs && playheadWallMs > 0 ? playheadWallMs : performance.now();
+    startedRef.current = true;
+  }, [playhead, playheadWallMs]);
+
+  // 速度用 ref 实时读取，避免变速时 rAF 副作用重启导致重锚跳动
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
+
+  // 播放中：rAF 按速度平滑外推播放头，逐帧重绘
+  useEffect(() => {
+    if (!playing) return;
+    // 播放刚开始：playState 乐观置为 playing，但音频要等 practicePlay 异步 + IPC
+    // 之后才真正出声。这段延迟内先把播放头冻结在锚点，直到首个真实进度事件到达
+    // 才开始外推；否则会出现“先冲到前面再被拉回真实位置”的闪烁。
+    startedRef.current = false;
+    let raf = 0;
+    const tick = () => {
+      const elapsed = (performance.now() - anchorWallRef.current) / 1000;
+      const sec = startedRef.current
+        ? anchorSecRef.current + elapsed * speedRef.current
+        : anchorSecRef.current;
+      drawRef.current(sec);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
+
+  // 非播放态（暂停 / seek）或可视数据变化时：在锚点处静态重绘一次
+  useEffect(() => {
+    if (playing) return;
+    drawRef.current(anchorSecRef.current);
   }, [
-    data,
+    playing,
     playhead,
-    duration,
+    data,
     labels,
     selectedId,
+    overlappingIds,
     dragDisplay,
-    colors,
     loopRange,
-    render,
     secToRatio,
+    duration,
   ]);
 
   return (

@@ -1,0 +1,12 @@
+[package]
+name = "audioplayer"
+version = "0.1.0"
+edition = "2021"
+description = "OwlListen 通用音频播放器：cpal 输出层 + FFmpeg atempo 变速不变调，供精听/泛听共用"
+
+[dependencies]
+cpal = "0.17.3"
+ffmpeg-next = "8.1.0"
+anyhow = "1"
+log = "0.4"
+arc-swap = "1"
